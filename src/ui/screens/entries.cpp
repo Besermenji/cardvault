@@ -119,7 +119,7 @@ public:
             text_mono(c, 28, ry, fit(e->title, 24).c_str());
         }
         scrollbar(c, first_, visible, int(ids_.size()));
-        footer(c, "ENTER open  TAB menu  type to search  ` lock");
+        footer(c, "ENTER open TAB menu abc=search ` lock");
     }
 
 private:
@@ -261,7 +261,7 @@ public:
             wipe(value);
         }
         scrollbar(c, first_, visible, nf);
-        footer(c, "hold SPACE reveal  R all  ENTER open  TAB more");
+        footer(c, "SPACE peek  R reveal  ENTER  TAB more");
     }
 
 private:
@@ -533,9 +533,9 @@ public:
             else
                 mask(c, x + 24, y + 4, 6, 8);
         }
-        const char* st = status_ == Bip39Status::Ok ? "checksum OK" : "not a valid BIP39 phrase";
+        const char* st = status_ == Bip39Status::Ok ? "BIP39 OK" : "not BIP39";
         char foot[64];
-        snprintf(foot, sizeof foot, "hold SPACE / R reveal  ,/ page  %s%s", st,
+        snprintf(foot, sizeof foot, "SPACE/R reveal ,/ page %s%s", st,
                  has_pass_ ? " +pass" : "");
         footer(c, foot);
     }
@@ -607,7 +607,7 @@ public:
             }
         }
         scrollbar(c, scroll_, rows, int(lines.size()));
-        footer(c, "hold SPACE / R reveal  ;. scroll  ` back");
+        footer(c, "SPACE peek R reveal ;. scroll ` back");
     }
 
 private:

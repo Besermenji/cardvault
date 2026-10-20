@@ -30,11 +30,23 @@ bool read_file(const char* path, std::vector<uint8_t>& out) {
     f.close();
     return n == out.size();
 }
+
+bool partition_blank(const esp_partition_t* p) {
+    uint8_t buf[256];
+    for (size_t off = 0; off < 16384 && off < p->size; off += sizeof buf) {
+        if (esp_partition_read(p, off, buf, sizeof buf) != ESP_OK) return false;
+        for (uint8_t b : buf)
+            if (b != 0xFF) return false;
+    }
+    return true;
+}
 }  // namespace
 
 bool FlashStore::begin() {
-    if (!find_partition(label_)) return false;
-    mounted_ = LittleFS.begin(true, "/vault", 4, label_);
+    const esp_partition_t* p = find_partition(label_);
+    if (!p) return false;
+    mounted_ = LittleFS.begin(false, "/vault", 4, label_);
+    if (!mounted_ && partition_blank(p)) mounted_ = LittleFS.begin(true, "/vault", 4, label_);
     if (mounted_ && !LittleFS.exists(kFile) && LittleFS.exists(kTmp)) {
         // Crash between writing the temp file and renaming it: finish the job.
         LittleFS.rename(kTmp, kFile);

@@ -60,10 +60,18 @@ void setup() {
 
     a.guard_kv.begin();
     if (!a.store.begin()) {
-        a.router.reset(make_message("Storage error",
-                                    "The vault partition could not be mounted. Flash the full "
-                                    "CardVault image (with its partition table).",
-                                    color::bad));
+        // Never format a non-blank partition silently: it may hold a damaged
+        // vault (recoverable by experts) or another app's data under Launcher.
+        a.router.reset(make_confirm(
+            "Storage not readable",
+            "The vault partition holds data CardVault cannot read. Format it? This destroys "
+            "anything stored there. (N = leave it alone)",
+            [] {
+                app().busy("Formatting...");
+                app().store.format();
+                ESP.restart();
+            },
+            color::bad));
         a.router.apply();
         return;
     }

@@ -125,7 +125,7 @@ public:
             snprintf(prev, sizeof prev, "#%d done", idx_);
             text_small(c, 130, y + 7, prev, color::good);
         }
-        footer(c, "ENTER pick  ;. choose  DEL back  fn+,/ word");
+        footer(c, "ENTER pick ;. choose DEL back fn,/ word");
     }
 
     void tick(uint32_t now) override {
@@ -277,7 +277,7 @@ public:
             text_small(c, x + 50, ry + 1, val, active ? color::text : color::line);
         }
         footer(c, use_ ? "G new  ,/ change  TAB use it  ` back"
-                       : "G new  ,/ change  TAB save as entry  ` back");
+                       : "G new  ,/ change  TAB save  ` back");
     }
 
 private:
