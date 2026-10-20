@@ -28,4 +28,8 @@ CardVault protects secrets stored on an M5Stack Cardputer ADV.
 - Someone watching your screen or keyboard while you unlock or reveal secrets.
 - Losing the device without a backup. Always keep an independent backup of seed phrases.
 
-See the README for the full design.
+- Short-lived copies of small secrets in RAM while the vault is unlocked (see
+  [docs/security-review-2026-10.md](docs/security-review-2026-10.md)). Everything is gone after
+  locking and a power cycle.
+
+See the README for the full design and [docs/HARDENING.md](docs/HARDENING.md) for optional eFuse hardening.

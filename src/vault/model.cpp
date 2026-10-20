@@ -21,7 +21,9 @@ void Entry::set(uint8_t key, const SString& value) {
             return;
         }
     }
-    fields.push_back(Field{key, value});
+    fields.emplace_back();
+    fields.back().key = key;
+    fields.back().value = value;
 }
 
 void Entry::clear() {

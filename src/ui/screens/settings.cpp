@@ -193,7 +193,10 @@ void restore_from(const std::string& name) {
             a.router.push(make_message("Restore failed", vault_error_str(e), color::bad));
             return;
         }
-        if (counted) a.guard.record_success();
+        // Knowing a backup's passphrase proves nothing about the device vault,
+        // so only undo this attempt. The counter is reset once the vault has
+        // actually been replaced (which destroys the old one).
+        if (counted) a.guard.refund();
         auto box = std::make_shared<SecretBox>(pass);
         char msg[120];
         snprintf(msg, sizeof msg,
