@@ -10,16 +10,12 @@ const char* kFile = "/vault.bin";
 const char* kTmp = "/vault.tmp";
 
 const esp_partition_t* find_partition(const char*& label) {
-    // Our own partition table has "vault"; when installed through Launcher the
-    // app runs with Launcher's table, which provides "spiffs".
-    for (const char* l : {"vault", "spiffs"}) {
-        auto* p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, l);
-        if (p) {
-            label = l;
-            return p;
-        }
-    }
-    return nullptr;
+    // Only ever our own "vault" partition. When installed through Launcher,
+    // Launcher creates it from the label in our partition table; we never fall
+    // back to shared partitions (spiffs, littlefs, fat) that other firmware
+    // may format or overwrite.
+    label = "vault";
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
 }
 
 bool read_file(const char* path, std::vector<uint8_t>& out) {
@@ -41,6 +37,11 @@ bool partition_blank(const esp_partition_t* p) {
     return true;
 }
 }  // namespace
+
+bool FlashStore::has_partition() {
+    const char* label = nullptr;
+    return find_partition(label) != nullptr;
+}
 
 bool FlashStore::begin() {
     const esp_partition_t* p = find_partition(label_);

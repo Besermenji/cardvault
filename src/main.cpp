@@ -78,6 +78,15 @@ void setup() {
     g_canvas.pushSprite(0, 0);
 
     a.guard_kv.begin();
+    if (!FlashStore::has_partition()) {
+        a.router.reset(make_message(
+            "No vault partition",
+            "This install has no 'vault' partition. Flash the full CardVault image, or install "
+            "the CardVault .bin with Launcher so its partition table is used.",
+            color::bad));
+        a.router.apply();
+        return;
+    }
     if (!a.store.begin()) {
         // Never format a non-blank partition silently: it may hold a damaged
         // vault (recoverable by experts) or another app's data under Launcher.

@@ -24,5 +24,6 @@ Publishing needs the maintainer's M5Stack community account, so it is done by ha
 ## Launcher
 
 [Launcher](https://github.com/bmorcelli/Launcher) lists firmware from the M5Burner database, so a
-published M5Burner entry becomes installable over the air. Under Launcher CardVault uses Launcher's
-`spiffs` data partition for the vault. Keep `firmware.bin` small (CI enforces a 2 MB budget).
+published M5Burner entry becomes installable over the air. Launcher reads the partition table inside
+the merged image and creates CardVault's `vault` data partition by label. CardVault never falls back to
+shared partitions (`spiffs`, `littlefs`, `fat`). Keep `firmware.bin` small (CI enforces a 2 MB budget).
