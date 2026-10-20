@@ -27,6 +27,11 @@ bool AttemptGuard::begin_attempt() {
 
 void AttemptGuard::record_success() { reset(); }
 
+void AttemptGuard::refund() {
+    uint32_t f = failures();
+    if (f > 0) kv_.set_u32(kKey, f - 1);
+}
+
 void AttemptGuard::reset() { kv_.set_u32(kKey, 0); }
 
 }  // namespace cv

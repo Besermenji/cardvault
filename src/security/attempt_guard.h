@@ -31,6 +31,9 @@ public:
     bool begin_attempt();
     // Call after the passphrase was accepted.
     void record_success();
+    // Undo begin_attempt() when the check could not run for reasons unrelated
+    // to the passphrase (out of memory, storage error).
+    void refund();
     void reset();
 
 private:

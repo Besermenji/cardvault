@@ -49,11 +49,23 @@ void test_refuses_when_counter_cannot_persist() {
     TEST_ASSERT_FALSE(g.begin_attempt());
 }
 
+void test_refund_undoes_one_attempt() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    g.refund();
+    TEST_ASSERT_EQUAL(0, g.failures());
+    g.begin_attempt();
+    g.begin_attempt();
+    g.refund();
+    TEST_ASSERT_EQUAL(1, g.failures());
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_delay_schedule);
     RUN_TEST(test_counts_before_check_and_resets_on_success);
     RUN_TEST(test_exhaustion_after_ten);
     RUN_TEST(test_refuses_when_counter_cannot_persist);
+    RUN_TEST(test_refund_undoes_one_attempt);
     return UNITY_END();
 }
