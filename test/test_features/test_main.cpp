@@ -7,6 +7,7 @@
 #include "features/base32.h"
 #include "features/bip39.h"
 #include "features/pwgen.h"
+#include "features/timeutil.h"
 #include "features/totp.h"
 
 using namespace cv;
@@ -139,6 +140,22 @@ void test_pwgen_words_and_strength() {
     TEST_ASSERT_TRUE(passphrase_strength_bits("correct horse battery staple") > 60);
 }
 
+void test_time_parse_format() {
+    uint32_t t = 0;
+    TEST_ASSERT_TRUE(parse_utc("2009-02-13 23:31:30", t));
+    TEST_ASSERT_EQUAL_UINT32(1234567890u, t);
+    TEST_ASSERT_TRUE(parse_utc("2024-02-29 00:00", t));
+    char buf[20];
+    format_utc(t, buf);
+    TEST_ASSERT_EQUAL_STRING("2024-02-29 00:00:00", buf);
+    format_utc(2000000000u, buf);
+    TEST_ASSERT_EQUAL_STRING("2033-05-18 03:33:20", buf);
+    TEST_ASSERT_FALSE(parse_utc("2023-02-29 00:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2024-13-01 00:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2024-01-01 24:00", t));
+    TEST_ASSERT_FALSE(parse_utc("garbage", t));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_bip39_official_vectors);
@@ -150,5 +167,6 @@ int main() {
     RUN_TEST(test_totp_rfc6238_sha1);
     RUN_TEST(test_pwgen_password);
     RUN_TEST(test_pwgen_words_and_strength);
+    RUN_TEST(test_time_parse_format);
     return UNITY_END();
 }
