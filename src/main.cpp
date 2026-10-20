@@ -14,6 +14,22 @@ M5Canvas g_canvas(&M5Cardputer.Display);
 constexpr uint32_t kDimBeforeLockMs = 10000;
 bool g_toast_was_active = false;
 
+#ifdef CV_SCREENSHOT
+// Debug builds only: dump the canvas as RGB565 hex rows over USB serial.
+// tools/screenshot.py turns the dump into a PNG.
+void dump_screenshot() {
+    Serial.printf("CVSHOT %d %d\n", kW, kH);
+    char hex[kW * 4 + 1];
+    for (int y = 0; y < kH; y++) {
+        for (int x = 0; x < kW; x++) {
+            snprintf(hex + x * 4, 5, "%04x", unsigned(g_canvas.readPixel(x, y)));
+        }
+        Serial.println(hex);
+    }
+    Serial.println("CVEND");
+}
+#endif
+
 void handle_autolock(App& a, uint32_t now) {
     if (!a.session.is_open()) {
         if (a.dimmed) {
@@ -40,6 +56,9 @@ void handle_autolock(App& a, uint32_t now) {
 void setup() {
     auto cfg = M5.config();
     M5Cardputer.begin(cfg, true);
+#ifdef CV_SCREENSHOT
+    Serial.begin(115200);
+#endif
     device::radios_off();
 
     App& a = app();
@@ -105,6 +124,13 @@ void loop() {
             a.apply_brightness();
             continue;  // the waking key press is swallowed
         }
+#ifdef CV_SCREENSHOT
+        if (k.ctrl && (k.ch == 's' || k.ch == 'S')) {
+            dump_screenshot();
+            a.toast("Screenshot sent", color::info);
+            continue;
+        }
+#endif
         if (Screen* s = a.router.top()) s->on_key(k);
         a.router.apply();
         if (a.lock_pending) a.lock_now();
