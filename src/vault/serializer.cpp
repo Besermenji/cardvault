@@ -87,7 +87,10 @@ VaultError deserialize(const uint8_t* in, size_t len, VaultData& data) {
     data.next_id = r.u32();
     uint16_t count = r.u16();
     for (uint16_t i = 0; i < count && r.ok; i++) {
-        Entry e;
+        // Build entries in place: moving from temporaries would leave short
+        // (small-string-optimised) secrets behind on the stack.
+        data.entries.emplace_back();
+        Entry& e = data.entries.back();
         e.id = r.u32();
         uint8_t type = r.u8();
         if (!valid_type(type)) {
@@ -100,12 +103,11 @@ VaultError deserialize(const uint8_t* in, size_t len, VaultData& data) {
         r.str(e.title);
         uint8_t nf = r.u8();
         for (uint8_t k = 0; k < nf && r.ok; k++) {
-            Field f;
+            e.fields.emplace_back();
+            Field& f = e.fields.back();
             f.key = r.u8();
             r.str(f.value);
-            e.fields.push_back(std::move(f));
         }
-        data.entries.push_back(std::move(e));
     }
     if (!r.ok || r.n != 0) {
         data.clear();

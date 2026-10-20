@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+- Restoring an SD backup while locked could reset the wrong-passphrase counter without replacing
+  the vault, allowing unlimited guesses. The counter now resets only after a restore completes.
+- Vault entries are deserialized in place so short secrets are not left in stack temporaries.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added
