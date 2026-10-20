@@ -1,6 +1,7 @@
 // Seed phrase entry, password generator, 2FA overview and clock setting.
 #include <M5Cardputer.h>
 
+#include "core/mnemonic_entry.h"
 #include "features/base32.h"
 #include "features/bip39.h"
 #include "features/pwgen.h"
@@ -15,114 +16,80 @@ namespace {
 
 class MnemonicInputScreen : public Screen {
 public:
+    const char* name() const override { return "mnemonic_input"; }
     MnemonicInputScreen(int n, const SString& initial, TextDone done)
-        : words_(size_t(n)), done_(std::move(done)) {
-        auto init = bip39_split(initial);
-        if (int(init.size()) == n) {
-            for (int i = 0; i < n; i++) words_[i] = init[i];
-        }
-        for (auto& w : init) wipe(w);
-        // Start at the first empty slot.
-        while (idx_ < n - 1 && !words_[idx_].empty()) idx_++;
-        update();
-    }
-    ~MnemonicInputScreen() override {
-        for (auto& w : words_) wipe(w);
-        wipe(prefix_);
-    }
+        : m_(n, initial), done_(std::move(done)) {}
 
     void on_key(const Key& k) override {
         invalidate();
-        int n = int(words_.size());
+        MnemonicEntry::Event ev = MnemonicEntry::Event::None;
         if (k.is(KeyCode::Esc)) {
             app().router.push(make_confirm("Discard words?", "The words typed so far are lost.",
                                            [] { app().router.pop(); }));
-        } else if (k.code == KeyCode::Char && k.ch >= 'a' && k.ch <= 'z') {
-            if (prefix_.size() < 8) prefix_ += k.ch;
-            update();
-            if (ncand_ == 1 && prefix_.size() >= 4) accept(cand_[0]);
-        } else if (k.code == KeyCode::Char && k.ch >= 'A' && k.ch <= 'Z') {
-            prefix_ += char(k.ch - 'A' + 'a');
-            update();
+        } else if (k.code == KeyCode::Char && isalpha(uint8_t(k.ch))) {
+            ev = m_.type_char(k.ch);
         } else if (k.is(KeyCode::Backspace)) {
-            if (!prefix_.empty()) {
-                prefix_.pop_back();
-            } else if (idx_ > 0 || !words_[idx_].empty()) {
-                if (words_[idx_].empty()) idx_--;
-                prefix_ = words_[idx_];
-                wipe(words_[idx_]);
-                if (!prefix_.empty()) prefix_.pop_back();
-            }
-            update();
+            m_.backspace();
         } else if (k.up()) {
-            if (ncand_) csel_ = (csel_ + ncand_ - 1) % shown();
+            m_.select_prev();
         } else if (k.down()) {
-            if (ncand_) csel_ = (csel_ + 1) % shown();
+            m_.select_next();
         } else if (k.is(KeyCode::Left)) {
-            if (idx_ > 0) {
-                commit_prefix();
-                idx_--;
-                update();
-            }
+            m_.prev_word();
         } else if (k.is(KeyCode::Right)) {
-            if (idx_ < n - 1 && !words_[idx_].empty()) {
-                idx_++;
-                update();
-            }
+            m_.next_word();
         } else if (k.is(KeyCode::Enter) || k.is(KeyCode::Tab) || k.is(' ')) {
-            if (ncand_ > 0)
-                accept(cand_[csel_]);
-            else if (prefix_.empty() && !words_[idx_].empty())
-                advance();
+            ev = m_.accept();
         }
+        if (ev == MnemonicEntry::Event::Completed) finish();
     }
 
     void draw(Canvas& c) override {
         clear(c);
-        int n = int(words_.size());
+        int n = m_.count();
+        int idx = m_.index();
         char title[32];
-        snprintf(title, sizeof title, "Word %d of %d", idx_ + 1, n);
+        snprintf(title, sizeof title, "Word %d of %d", idx + 1, n);
         header(c, title, color::accent);
 
         // Progress dots
         int dot_w = (kW - 16) / n;
         for (int i = 0; i < n; i++) {
-            uint16_t col = i == idx_ ? color::accent : words_[i].empty() ? color::line : color::good;
+            uint16_t col = i == idx ? color::accent : m_.word(i).empty() ? color::line : color::good;
             c.fillRoundRect(8 + i * dot_w, kBodyY + 1, dot_w - 2, 4, 2, col);
         }
 
-        // Typed prefix
+        // Typed prefix (or the already accepted word)
         int y = kBodyY + 10;
         c.fillRoundRect(6, y, 110, 22, 4, color::panel);
-        SString shown_word = prefix_.empty() ? words_[idx_] : prefix_;
-        text_mono(c, 12, y + 3, shown_word.c_str(), prefix_.empty() ? color::good : color::text);
-        wipe(shown_word);
+        const SString& prefix = m_.prefix();
+        const SString& shown_word = prefix.empty() ? m_.word(idx) : prefix;
+        text_mono(c, 12, y + 3, shown_word.c_str(), prefix.empty() ? color::good : color::text);
         if ((millis() / 500) % 2 == 0)
-            c.fillRect(12 + int(prefix_.size()) * kMonoW, y + 4, 2, 14, color::accent);
+            c.fillRect(12 + int(prefix.size()) * kMonoW, y + 4, 2, 14, color::accent);
 
         // Candidates
         int cy = kBodyY + 36;
-        if (prefix_.empty()) {
+        if (prefix.empty()) {
             text_small(c, 8, cy, "Type the first letters of the word.");
             text_small(c, 8, cy + 11, "4 letters are always enough.");
-        } else if (ncand_ == 0) {
+        } else if (m_.candidate_total() == 0) {
             text_small(c, 8, cy, "No BIP39 word starts like this.", color::bad);
         }
-        for (int i = 0; i < shown(); i++) {
+        for (int i = 0; i < m_.candidates_shown(); i++) {
             int ry = cy + i * 15;
-            list_row(c, ry - 1, 14, i == csel_);
-            text_mono(c, 12, ry - 2, kBip39Words[cand_[i]], i == csel_ ? color::text : color::dim);
+            bool sel = i == m_.selected();
+            list_row(c, ry - 1, 14, sel);
+            text_mono(c, 12, ry - 2, kBip39Words[m_.candidate(i)], sel ? color::text : color::dim);
         }
-        if (ncand_ > shown()) {
+        if (m_.candidate_total() > m_.candidates_shown()) {
             char more[16];
-            snprintf(more, sizeof more, "+%d more", ncand_ - shown());
+            snprintf(more, sizeof more, "+%d more", m_.candidate_total() - m_.candidates_shown());
             text_small(c, 130, cy + 3 * 15, more);
         }
-
-        // Previous word, masked, for orientation
-        if (idx_ > 0) {
+        if (idx > 0) {
             char prev[24];
-            snprintf(prev, sizeof prev, "#%d done", idx_);
+            snprintf(prev, sizeof prev, "#%d done", idx);
             text_small(c, 130, y + 7, prev, color::good);
         }
         footer(c, "ENTER pick ;. choose DEL back fn,/ word");
@@ -137,53 +104,10 @@ public:
     }
 
 private:
-    static constexpr int kMaxShown = 4;
-    int shown() const { return ncand_ < kMaxShown ? ncand_ : kMaxShown; }
-
-    void update() {
-        ncand_ = prefix_.empty() ? 0 : bip39_complete(prefix_.c_str(), cand_, kMaxShown);
-        csel_ = 0;
-    }
-
-    void commit_prefix() {
-        int i = bip39_index(prefix_.c_str());
-        if (i >= 0) words_[idx_] = kBip39Words[i];
-        wipe(prefix_);
-    }
-
-    void accept(int word_index) {
-        words_[idx_] = kBip39Words[word_index];
-        wipe(prefix_);
-        advance();
-    }
-
-    void advance() {
-        int n = int(words_.size());
-        update();
-        if (idx_ < n - 1) {
-            idx_++;
-            return;
-        }
-        for (int i = 0; i < n; i++) {
-            if (words_[i].empty()) {
-                idx_ = i;
-                return;
-            }
-        }
-        finish();
-    }
-
     void finish() {
-        SString joined;
-        for (size_t i = 0; i < words_.size(); i++) {
-            if (i) joined += ' ';
-            joined += words_[i];
-        }
-        auto box = std::make_shared<SecretBox>(joined);
-        wipe(joined);
+        auto box = std::make_shared<SecretBox>(m_.joined());
         TextDone done = done_;
-        Bip39Status st = bip39_validate(box->value);
-        if (st == Bip39Status::Ok) {
+        if (bip39_validate(box->value) == Bip39Status::Ok) {
             app().router.pop();
             done(box->value);
             app().toast("Checksum OK", color::good);
@@ -199,12 +123,7 @@ private:
             color::bad));
     }
 
-    SVec<SString> words_;
-    int idx_ = 0;
-    SString prefix_;
-    int cand_[kMaxShown] = {};
-    int ncand_ = 0;
-    int csel_ = 0;
+    MnemonicEntry m_;
     bool blink_ = false;
     TextDone done_;
 };
@@ -213,6 +132,7 @@ private:
 
 class PwgenScreen : public Screen {
 public:
+    const char* name() const override { return "pwgen"; }
     explicit PwgenScreen(TextDone use) : use_(std::move(use)) { regenerate(); }
     ~PwgenScreen() override { wipe(value_); }
 
@@ -330,6 +250,7 @@ private:
 
 class TotpListScreen : public Screen {
 public:
+    const char* name() const override { return "totp_list"; }
     void on_key(const Key& k) override {
         invalidate();
         auto ids = totp_ids();

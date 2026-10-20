@@ -1,7 +1,12 @@
 // First-run setup and the unlock screen.
 #include <M5Cardputer.h>
 
+#include "core/flows.h"
 #include "ui/app.h"
+
+#ifndef CV_TEST_DELAY_DIV
+#define CV_TEST_DELAY_DIV 1
+#endif
 
 namespace cv {
 namespace ui {
@@ -34,6 +39,7 @@ void create_vault(SString& pass) {
 
 class SetupScreen : public Screen {
 public:
+    const char* name() const override { return "setup"; }
     void on_key(const Key& k) override {
         if (k.is(KeyCode::Enter)) {
             ask_new_passphrase("New passphrase", [](SString& p) { create_vault(p); });
@@ -71,6 +77,7 @@ public:
 
 class UnlockScreen : public Screen {
 public:
+    const char* name() const override { return "unlock"; }
     UnlockScreen() { schedule(); }
     ~UnlockScreen() override { wipe(pass_); }
 
@@ -162,45 +169,40 @@ private:
     bool waiting() const { return int32_t(unlock_at_ - millis()) > 0; }
 
     void schedule() {
-        uint32_t d = app().guard.required_delay_ms();
+        // Test builds shorten the real schedule (verified separately by host
+        // tests) so end-to-end runs don't take a quarter of an hour.
+        uint32_t d = app().guard.required_delay_ms() / CV_TEST_DELAY_DIV;
         unlock_at_ = millis() + d;
     }
 
     void attempt() {
         App& a = app();
         if (pass_.empty()) return;
-        if (!a.guard.begin_attempt()) {
-            if (a.guard.exhausted()) a.wipe_and_reboot("Too many wrong passphrases.");
-            error_ = "Storage error - try again";
-            return;
-        }
         a.busy("Unlocking...");
-        VaultError e = a.session.unlock(a.store, pass_);
+        UnlockResult r = unlock_attempt(a.guard, a.session, a.store, pass_);
         wipe(pass_);
         reveal_ = false;
-        switch (e) {
-            case VaultError::Ok:
-                a.guard.record_success();
+        switch (r.kind) {
+            case UnlockResult::Unlocked:
                 a.router.reset(make_home());
                 return;
-            case VaultError::WrongPassphrase:
-                if (a.guard.exhausted())
-                    a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
+            case UnlockResult::MustWipe:
+                a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
+            case UnlockResult::Wrong:
                 error_ = "Wrong passphrase";
                 schedule();
                 return;
-            case VaultError::Corrupt:
-                // The passphrase was right (the key unwrapped) but the data is damaged.
-                a.guard.record_success();
-                a.session.close();
+            case UnlockResult::Damaged:
                 a.router.push(make_message("Vault damaged",
                                            "The passphrase is correct but the vault data is "
                                            "corrupted. Restore a backup from SD (TAB menu).",
                                            color::bad));
                 return;
-            default:
-                a.guard.refund();
-                error_ = vault_error_str(e);
+            case UnlockResult::Refused:
+                error_ = "Storage error - try again";
+                return;
+            case UnlockResult::Failed:
+                error_ = vault_error_str(r.error);
                 return;
         }
     }

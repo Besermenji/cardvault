@@ -1,6 +1,7 @@
 // CardVault — offline encrypted secrets vault for the M5Stack Cardputer ADV.
 #include <M5Cardputer.h>
 
+#include "core/flows.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
 #include "ui/app.h"
@@ -31,23 +32,23 @@ void dump_screenshot() {
 #endif
 
 void handle_autolock(App& a, uint32_t now) {
-    if (!a.session.is_open()) {
-        if (a.dimmed) {
+    switch (autolock_step(a.session.is_open(), a.dimmed, now - a.last_input_ms,
+                          a.settings.autolock_s * 1000, kDimBeforeLockMs)) {
+        case AutolockAction::None: break;
+        case AutolockAction::Wake:
             a.dimmed = false;
             a.apply_brightness();
-        }
-        return;
-    }
-    uint32_t idle = now - a.last_input_ms;
-    uint32_t limit = a.settings.autolock_s * 1000;
-    if (idle >= limit) {
-        a.dimmed = false;
-        a.apply_brightness();
-        a.lock_now();
-        a.toast("Locked (idle)", color::accent);
-    } else if (idle + kDimBeforeLockMs >= limit && !a.dimmed) {
-        a.dimmed = true;
-        M5Cardputer.Display.setBrightness(8);
+            break;
+        case AutolockAction::Dim:
+            a.dimmed = true;
+            M5Cardputer.Display.setBrightness(8);
+            break;
+        case AutolockAction::Lock:
+            a.dimmed = false;
+            a.apply_brightness();
+            a.lock_now();
+            a.toast("Locked (idle)", color::accent);
+            break;
     }
 }
 
@@ -78,36 +79,36 @@ void setup() {
     g_canvas.pushSprite(0, 0);
 
     a.guard_kv.begin();
-    if (!FlashStore::has_partition()) {
-        a.router.reset(make_message(
-            "No vault partition",
-            "This install has no 'vault' partition. Flash the full CardVault image, or install "
-            "the CardVault .bin with Launcher so its partition table is used.",
-            color::bad));
-        a.router.apply();
-        return;
+    bool has_partition = FlashStore::has_partition();
+    bool mounted = has_partition && a.store.begin();
+    switch (boot_route(has_partition, mounted, a.guard.exhausted(), mounted && a.store.exists())) {
+        case BootRoute::NoPartition:
+            a.router.reset(make_message(
+                "No vault partition",
+                "This install has no 'vault' partition. Flash the full CardVault image, or "
+                "install the CardVault .bin with Launcher so its partition table is used.",
+                color::bad));
+            break;
+        case BootRoute::StorageUnreadable:
+            // Never format a non-blank partition silently: it may hold a damaged
+            // vault or another app's data.
+            a.router.reset(make_confirm(
+                "Storage not readable",
+                "The vault partition holds data CardVault cannot read. Format it? This destroys "
+                "anything stored there. (N = leave it alone)",
+                [] {
+                    app().busy("Formatting...");
+                    app().store.format();
+                    ESP.restart();
+                },
+                color::bad));
+            break;
+        case BootRoute::Wipe:
+            // Power was cut between the last failed attempt and the wipe.
+            a.wipe_and_reboot("Too many wrong passphrases.");
+        case BootRoute::Unlock: a.router.reset(make_unlock()); break;
+        case BootRoute::Setup: a.router.reset(make_setup()); break;
     }
-    if (!a.store.begin()) {
-        // Never format a non-blank partition silently: it may hold a damaged
-        // vault (recoverable by experts) or another app's data under Launcher.
-        a.router.reset(make_confirm(
-            "Storage not readable",
-            "The vault partition holds data CardVault cannot read. Format it? This destroys "
-            "anything stored there. (N = leave it alone)",
-            [] {
-                app().busy("Formatting...");
-                app().store.format();
-                ESP.restart();
-            },
-            color::bad));
-        a.router.apply();
-        return;
-    }
-    if (a.guard.exhausted()) {
-        // Power was cut between the last failed attempt and the wipe.
-        a.wipe_and_reboot("Too many wrong passphrases.");
-    }
-    a.router.reset(a.store.exists() ? make_unlock() : make_setup());
     a.router.apply();
     a.last_input_ms = millis();
 }

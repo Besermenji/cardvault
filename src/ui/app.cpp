@@ -1,5 +1,7 @@
 #include "ui/app.h"
 
+#include "core/flows.h"
+
 #include <M5Cardputer.h>
 
 namespace cv {
@@ -12,9 +14,7 @@ App& app() {
 
 void App::lock_now() {
     lock_pending = false;
-    router.clear_now();
-    session.close();
-    router.reset(make_unlock());
+    lock_session(router, session, make_unlock());
 }
 
 bool App::save() {

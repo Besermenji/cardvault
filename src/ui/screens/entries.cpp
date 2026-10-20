@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include "core/entry_rules.h"
 #include "features/base32.h"
 #include "features/bip39.h"
 #include "features/totp.h"
@@ -49,6 +50,7 @@ void draw_code(Canvas& c, int cx, int cy, const char* code, int digits, uint16_t
 
 class HomeScreen : public Screen {
 public:
+    const char* name() const override { return "home"; }
     HomeScreen() { refresh(); }
 
     void on_resume() override {
@@ -158,6 +160,7 @@ private:
 
 class EntryViewScreen : public Screen {
 public:
+    const char* name() const override { return "entry_view"; }
     explicit EntryViewScreen(uint32_t id) : id_(id) {}
 
     void on_key(const Key& k) override {
@@ -305,6 +308,7 @@ private:
 
 class EntryEditScreen : public Screen {
 public:
+    const char* name() const override { return "entry_edit"; }
     EntryEditScreen(uint32_t id, EntryType type, const SString* prefill) : id_(id) {
         if (const Entry* src = app().session.data().find(id)) {
             draft_ = *src;
@@ -440,31 +444,37 @@ private:
     }
 
     void save() {
-        if (draft_.title.empty()) {
-            if (draft_.type == EntryType::Totp && !draft_.get_or(kFieldIssuer).empty())
-                draft_.title = draft_.get_or(kFieldIssuer);
-            else
-                draft_.title = entry_type_name(draft_.type);
-        }
-        if (draft_.type == EntryType::Totp) {
-            SBytes key;
-            if (!base32_decode(draft_.get_or(kFieldTotpSecret), key) || key.empty()) {
-                app().toast("Secret is not valid base32", color::bad);
-                return;
-            }
+        if (const char* err = finalize_entry(draft_)) {
+            app().toast(err, color::bad);
+            return;
         }
         uint32_t now = device::unix_time();
         auto& data = app().session.data();
         draft_.updated = now;
         uint32_t id = id_;
+        Entry previous;
         if (Entry* existing = data.find(id_)) {
+            previous = *existing;
             existing->clear();
             *existing = draft_;
         } else {
             draft_.created = now;
             id = data.add(draft_);
         }
-        if (!app().save()) return;
+        if (!app().save()) {
+            // Keep memory consistent with flash: undo the change.
+            if (Entry* e = data.find(id)) {
+                if (id_) {
+                    e->clear();
+                    *e = previous;
+                } else {
+                    data.remove(id);
+                }
+            }
+            previous.clear();
+            return;
+        }
+        previous.clear();
         dirty_ = false;
         app().toast("Saved");
         app().router.pop();
@@ -482,6 +492,7 @@ private:
 
 class SeedViewScreen : public Screen {
 public:
+    const char* name() const override { return "seed_view"; }
     explicit SeedViewScreen(uint32_t id) {
         if (const Entry* e = app().session.data().find(id)) {
             words_ = bip39_split(e->get_or(kFieldWords));
@@ -559,6 +570,7 @@ private:
 
 class TextViewScreen : public Screen {
 public:
+    const char* name() const override { return "text_view"; }
     TextViewScreen(uint32_t id, uint8_t field) : field_(field) {
         if (const Entry* e = app().session.data().find(id)) {
             text_ = e->get_or(field);
