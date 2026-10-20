@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "ui/input.h"
@@ -22,6 +23,10 @@ public:
     virtual ~Screen() = default;
     // Stable identifier used by tests and diagnostics.
     virtual const char* name() const = 0;
+    // Optional: title shown in the header (menus, inputs, dialogs).
+    virtual const char* title() const { return ""; }
+    // Optional: extra state for end-to-end tests (only queried by test builds).
+    virtual void debug(std::string& out) const { (void)out; }
     virtual void on_key(const Key& k) = 0;
     virtual void draw(Canvas& c) = 0;
     virtual void tick(uint32_t now_ms) { (void)now_ms; }

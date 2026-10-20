@@ -78,6 +78,13 @@ public:
 class UnlockScreen : public Screen {
 public:
     const char* name() const override { return "unlock"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        uint32_t wait = waiting() ? unlock_at_ - millis() : 0;
+        out = "len=" + std::to_string(pass_.size()) + " wait_ms=" + std::to_string(wait) +
+              " error=" + (error_ ? error_ : "");
+    }
+#endif
     UnlockScreen() { schedule(); }
     ~UnlockScreen() override { wipe(pass_); }
 

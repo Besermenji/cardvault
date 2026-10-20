@@ -40,11 +40,19 @@ jobs:
           echo "firmware.bin: $size bytes (budget $budget)"
           test "$size" -le "$budget"
 
-      - name: Release build must not contain debug screenshot code
-        run: "! LC_ALL=C grep -a -q CVSHOT .pio/build/cardputer/firmware.bin"
+      - name: Release build must not contain debug or test code
+        run: |
+          for marker in CVSHOT "CVTEST READY" cvt_guard "unknown command"; do
+            if LC_ALL=C grep -a -q "$marker" .pio/build/cardputer/firmware.bin; then
+              echo "release firmware contains test/debug marker: $marker"; exit 1
+            fi
+          done
 
-      - name: Debug build compiles
-        run: pio run -e cardputer-debug
+      - name: Debug, e2e and on-device test builds compile
+        run: |
+          pio run -e cardputer-debug
+          pio run -e cardputer-e2e
+          pio test -e cardputer-test --without-uploading --without-testing
 
       - name: Merge image
         run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release

@@ -74,6 +74,9 @@ void show_about() {
 class SettingsScreen : public Screen {
 public:
     const char* name() const override { return "settings"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override { out = "sel=" + std::to_string(sel_); }
+#endif
     void on_key(const Key& k) override {
         invalidate();
         if (k.back()) {

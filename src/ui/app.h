@@ -16,7 +16,7 @@ namespace ui {
 struct App {
     VaultSession session;
     FlashStore store;
-    NvsKv guard_kv{"cv_guard"};
+    NvsKv guard_kv{CV_NVS_GUARD};
     AttemptGuard guard{guard_kv};
     Settings settings;
     Router router;

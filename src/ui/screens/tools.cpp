@@ -17,6 +17,12 @@ namespace {
 class MnemonicInputScreen : public Screen {
 public:
     const char* name() const override { return "mnemonic_input"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "index=" + std::to_string(m_.index()) + " prefix=" + m_.prefix().c_str() +
+              " candidates=" + std::to_string(m_.candidate_total());
+    }
+#endif
     MnemonicInputScreen(int n, const SString& initial, TextDone done)
         : m_(n, initial), done_(std::move(done)) {}
 
@@ -133,6 +139,11 @@ private:
 class PwgenScreen : public Screen {
 public:
     const char* name() const override { return "pwgen"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = std::string("value=") + value_.c_str() + " sel=" + std::to_string(sel_);
+    }
+#endif
     explicit PwgenScreen(TextDone use) : use_(std::move(use)) { regenerate(); }
     ~PwgenScreen() override { wipe(value_); }
 
@@ -251,6 +262,26 @@ private:
 class TotpListScreen : public Screen {
 public:
     const char* name() const override { return "totp_list"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "codes=";
+        uint32_t now = device::unix_time();
+        bool first = true;
+        for (auto& e : app().session.data().entries) {
+            if (e.type != EntryType::Totp) continue;
+            SBytes key;
+            if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) continue;
+            int digits = atoi(e.get_or(kFieldTotpDigits, "6").c_str()) == 8 ? 8 : 6;
+            uint32_t period = uint32_t(atoi(e.get_or(kFieldTotpPeriod, "30").c_str()));
+            if (period < 10 || period > 300) period = 30;
+            char code[10];
+            totp_format(totp(key.data(), key.size(), now, period, digits), digits, code);
+            if (!first) out += "|";
+            first = false;
+            out += std::string(e.title.c_str()) + ":" + code + ":" + std::to_string(now);
+        }
+    }
+#endif
     void on_key(const Key& k) override {
         invalidate();
         auto ids = totp_ids();

@@ -4,6 +4,7 @@
 #include "core/flows.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
+#include "test_hooks.h"
 #include "ui/app.h"
 
 using namespace cv;
@@ -111,6 +112,9 @@ void setup() {
     }
     a.router.apply();
     a.last_input_ms = millis();
+#ifdef CV_TEST_HOOKS
+    test::begin();
+#endif
 }
 
 void loop() {
@@ -118,8 +122,14 @@ void loop() {
     App& a = app();
     uint32_t now = millis();
 
+#ifdef CV_TEST_HOOKS
+    test::poll(a);
+    bool g0 = M5Cardputer.BtnA.wasPressed() || test::take_g0();
+#else
+    bool g0 = M5Cardputer.BtnA.wasPressed();
+#endif
     // G0 side button: instant lock.
-    if (M5Cardputer.BtnA.wasPressed() && a.session.is_open()) {
+    if (g0 && a.session.is_open()) {
         a.lock_now();
         a.toast("Locked", color::accent);
     }

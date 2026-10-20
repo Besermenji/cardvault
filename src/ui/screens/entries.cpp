@@ -51,6 +51,12 @@ void draw_code(Canvas& c, int cx, int cy, const char* code, int digits, uint16_t
 class HomeScreen : public Screen {
 public:
     const char* name() const override { return "home"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "rows=" + std::to_string(ids_.size()) + " sel=" + std::to_string(sel_) +
+              " query=" + query_.c_str();
+    }
+#endif
     HomeScreen() { refresh(); }
 
     void on_resume() override {
@@ -161,6 +167,12 @@ private:
 class EntryViewScreen : public Screen {
 public:
     const char* name() const override { return "entry_view"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "id=" + std::to_string(id_) + " sel=" + std::to_string(sel_) +
+              " reveal_all=" + std::to_string(reveal_all_) + " held=" + std::to_string(held_);
+    }
+#endif
     explicit EntryViewScreen(uint32_t id) : id_(id) {}
 
     void on_key(const Key& k) override {
@@ -309,6 +321,12 @@ private:
 class EntryEditScreen : public Screen {
 public:
     const char* name() const override { return "entry_edit"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "sel=" + std::to_string(sel_) + " dirty=" + std::to_string(dirty_) +
+              " type=" + std::to_string(int(draft_.type));
+    }
+#endif
     EntryEditScreen(uint32_t id, EntryType type, const SString* prefill) : id_(id) {
         if (const Entry* src = app().session.data().find(id)) {
             draft_ = *src;
@@ -493,6 +511,12 @@ private:
 class SeedViewScreen : public Screen {
 public:
     const char* name() const override { return "seed_view"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "page=" + std::to_string(page_) + " show=" + std::to_string(reveal_ || held_) +
+              " words=" + std::to_string(words_.size());
+    }
+#endif
     explicit SeedViewScreen(uint32_t id) {
         if (const Entry* e = app().session.data().find(id)) {
             words_ = bip39_split(e->get_or(kFieldWords));
@@ -571,6 +595,11 @@ private:
 class TextViewScreen : public Screen {
 public:
     const char* name() const override { return "text_view"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "show=" + std::to_string(reveal_ || held_ || !field_is_secret(field_));
+    }
+#endif
     TextViewScreen(uint32_t id, uint8_t field) : field_(field) {
         if (const Entry* e = app().session.data().find(id)) {
             text_ = e->get_or(field);
