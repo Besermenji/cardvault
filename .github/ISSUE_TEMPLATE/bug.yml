@@ -1,0 +1,33 @@
+name: Bug report
+description: Something is not working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "⚠️ Never paste real secrets, passphrases or vault files here. For security issues use private vulnerability reporting instead."
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options: [Cardputer ADV, Cardputer (original), Other]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behaviour
+    validations:
+      required: true

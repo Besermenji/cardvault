@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an idea
+labels: [feature]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: Could this weaken the vault (new I/O, radios, plaintext exposure)?
