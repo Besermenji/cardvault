@@ -51,6 +51,18 @@ inline void wipe(SBytes& b) {
     b.shrink_to_fit();
 }
 
+// Heap-friendly holder for a secret string that is shared between callbacks
+// (e.g. via std::make_shared). Wipes the value, including any inline
+// small-string buffer, when the last owner goes away.
+struct SecretBox {
+    SString value;
+    SecretBox() = default;
+    explicit SecretBox(const SString& v) : value(v) {}
+    SecretBox(const SecretBox&) = delete;
+    SecretBox& operator=(const SecretBox&) = delete;
+    ~SecretBox() { wipe(value); }
+};
+
 // Fixed-size secret that wipes itself when it goes out of scope.
 template <size_t N>
 struct SecretKey {
