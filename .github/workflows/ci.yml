@@ -40,6 +40,12 @@ jobs:
           echo "firmware.bin: $size bytes (budget $budget)"
           test "$size" -le "$budget"
 
+      - name: Release build must not contain debug screenshot code
+        run: "! LC_ALL=C grep -a -q CVSHOT .pio/build/cardputer/firmware.bin"
+
+      - name: Debug build compiles
+        run: pio run -e cardputer-debug
+
       - name: Merge image
         run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
