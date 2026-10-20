@@ -23,7 +23,8 @@ jobs:
       - name: Check version matches tag
         run: |
           v="${GITHUB_REF_NAME#v}"
-          grep -q "#define CV_VERSION \"$v\"" src/version.h || {
+          base="${v%%-*}"   # v0.1.0-rc1 -> 0.1.0
+          grep -q "#define CV_VERSION \"$base\"" src/version.h || {
             echo "src/version.h does not match tag $GITHUB_REF_NAME"; exit 1; }
 
       - name: Test and build
@@ -37,6 +38,7 @@ jobs:
       - name: Extract changelog section
         run: |
           v="${GITHUB_REF_NAME#v}"
+          v="${v%%-*}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
 
