@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install platformio==6.1.19
+
+      - name: Check version matches tag
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          grep -q "#define CV_VERSION \"$v\"" src/version.h || {
+            echo "src/version.h does not match tag $GITHUB_REF_NAME"; exit 1; }
+
+      - name: Test and build
+        run: |
+          pio test -e native
+          pio run -e cardputer
+
+      - name: Merge image
+        run: tools/merge_bin.sh "${GITHUB_REF_NAME#v}" release
+
+      - name: Extract changelog section
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" release/* --title "CardVault $GITHUB_REF_NAME" \
+            --notes-file notes.md $pre
+
+      - name: Prepare web flasher
+        run: |
+          mkdir -p site
+          cp -r docs/flasher/* site/
+          cp release/cardvault-*-cardputer-adv.bin site/cardvault.bin
+          sed -i "s/__VERSION__/${GITHUB_REF_NAME#v}/" site/manifest.json site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ !github.event.repository.private }}
+        with:
+          path: site
+
+  pages:
+    needs: release
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

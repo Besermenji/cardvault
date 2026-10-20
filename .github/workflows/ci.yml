@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio==6.1.19
+
+      - name: Unit tests (host)
+        run: pio test -e native
+
+      - name: Build firmware
+        run: pio run -e cardputer
+
+      - name: Check firmware size budget
+        run: |
+          size=$(stat -c %s .pio/build/cardputer/firmware.bin)
+          budget=$((2 * 1024 * 1024))  # stay well under the 3 MB app slot (Launcher-friendly)
+          echo "firmware.bin: $size bytes (budget $budget)"
+          test "$size" -le "$budget"
+
+      - name: Merge image
+        run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cardvault-firmware
+          path: release/

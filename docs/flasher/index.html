@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CardVault Flasher</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <style>
+    :root { --bg: #f6f7f9; --fg: #14171f; --muted: #5b6475; --card: #ffffff; --accent: #c96f00; --line: #dde1e8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0b0e14; --fg: #e6e9ef; --muted: #8b95a8; --card: #161b26; --accent: #f7931a; --line: #2a3142; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 48px 16px; }
+    h1 { margin: 0 0 4px; font-size: 32px; }
+    h1 span { color: var(--accent); }
+    .sub { color: var(--muted); margin: 0 0 32px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+    ol { padding-left: 20px; margin: 0; }
+    li { margin: 6px 0; }
+    .warn { border-left: 4px solid var(--accent); }
+    code { background: var(--bg); padding: 1px 6px; border-radius: 4px; }
+    esp-web-install-button { display: block; margin-top: 16px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Card<span>Vault</span></h1>
+    <p class="sub">Offline encrypted secrets vault for the M5Stack Cardputer ADV — v__VERSION__</p>
+
+    <div class="card">
+      <ol>
+        <li>Use Chrome or Edge on a desktop computer.</li>
+        <li>Turn the Cardputer off, hold <code>G0</code>, plug in USB-C, then release.</li>
+        <li>Click <b>Install</b> and choose the USB serial port.</li>
+      </ol>
+      <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    </div>
+
+    <div class="card warn">
+      <b>Before you install:</b> flashing replaces whatever firmware is on the device.
+      If you already use CardVault, make an SD backup first — erasing the flash erases the vault.
+      Verify the image checksum against the
+      <a href="https://github.com/Besermenji/cardvault/releases">GitHub release</a>.
+    </div>
+  </main>
+</body>
+</html>
