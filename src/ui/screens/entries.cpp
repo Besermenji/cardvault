@@ -2,7 +2,6 @@
 #include <M5Cardputer.h>
 
 #include <algorithm>
-#include <cctype>
 
 #include "core/entry_rules.h"
 #include "features/base32.h"
@@ -15,10 +14,6 @@ namespace ui {
 
 namespace {
 
-bool is_blank(const SString& s) {
-    return std::all_of(s.begin(), s.end(), [](char c) { return isspace(uint8_t(c)) != 0; });
-}
-
 bool icontains(const SString& hay, const SString& needle) {
     if (needle.empty()) return true;
     auto it = std::search(hay.begin(), hay.end(), needle.begin(), needle.end(),
@@ -30,10 +25,7 @@ bool icontains(const SString& hay, const SString& needle) {
 bool totp_now(const Entry& e, char* code, int& digits, uint32_t& period) {
     SBytes key;
     if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) return false;
-    digits = atoi(e.get_or(kFieldTotpDigits, "6").c_str());
-    if (digits != 6 && digits != 8) digits = 6;
-    period = uint32_t(atoi(e.get_or(kFieldTotpPeriod, "30").c_str()));
-    if (period < 10 || period > 300) period = 30;
+    totp_settings(e, digits, period);
     uint32_t v = totp(key.data(), key.size(), device::unix_time(), period, digits);
     totp_format(v, digits, code);
     return true;
@@ -445,10 +437,18 @@ private:
     }
 
     // Stores a field value, asking first when it would clear a stored one.
+    // The defining field (password, words, ...) cannot be cleared at all.
     void set_field(uint8_t f, const SString& v) {
-        if (!is_blank(v) || is_blank(draft_.get_or(f))) {
+        const SString* old = draft_.get(f);
+        if (!field_value_empty(f, v) || !old || field_value_empty(f, *old)) {
             draft_.set(f, v);
             dirty_ = true;
+            return;
+        }
+        if (f == entry_defining_field(draft_.type)) {
+            char msg[48];
+            snprintf(msg, sizeof msg, "%s can't be empty", field_label(f));
+            app().toast(msg, color::warn, 2500);
             return;
         }
         char title[32];
@@ -473,10 +473,20 @@ private:
     }
 
     void generate() {
-        app().router.push(make_pwgen([this](SString& v) {
-            draft_.set(kFieldPassword, v);
-            dirty_ = true;
-        }));
+        auto open = [this] {
+            app().router.push(make_pwgen([this](SString& v) {
+                draft_.set(kFieldPassword, v);
+                dirty_ = true;
+            }));
+        };
+        const SString* old = draft_.get(kFieldPassword);
+        if (!old || old->empty()) {
+            open();
+            return;
+        }
+        app().router.push(make_confirm("Replace password?",
+                                       "The generated password replaces the current one when you save.",
+                                       open, color::warn));
     }
 
     void save() {

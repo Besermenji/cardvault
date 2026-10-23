@@ -578,7 +578,12 @@ def t18_tab_never_saves(d):
     check(st["entries"] == 0, f"empty note was saved: {st}")
 
     new_entry(d, "Password")
-    d.key("down", 2)
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.type("alice")
+    d.key("enter")
+    d.key("down")
     d.key("enter")
     d.screen("text_input", "Password")
     d.type("hunter22")
@@ -588,19 +593,34 @@ def t18_tab_never_saves(d):
     d.screen("entry_view")
     d.key("e")
     d.screen("entry_edit")
-    d.key("down", 2)
+    d.key("down", 2)  # Password: the defining field cannot be cleared
     d.key("enter")
     d.screen("text_input", "Password")
     d.key("bs", 8)
     d.key("enter")
-    d.screen("confirm", "Clear Password?")
+    d.toast("can't be empty")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"clearing the password must be refused: {st}")
+    d.key("up")  # Username: clearing asks first
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.key("bs", 5)
+    d.key("enter")
+    d.screen("confirm", "Clear Username?")
     d.key("n")
     st = d.screen("entry_edit")
     check(info(st)["dirty"] == "0", f"declined clear must not change the draft: {st}")
+    d.key("down")  # Password: G asks before replacing it
+    d.key("g")
+    d.screen("confirm", "Replace password?")
+    d.key("n")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"declined replace must not change the draft: {st}")
     d.key("esc")
     d.screen("entry_view")
     bank = [e for e in d.dump() if e["title"] == "Bank"]
-    check(bank and bank[0]["fields"]["5"] == "hunter22", f"password changed: {bank}")
+    check(bank and bank[0]["fields"]["5"] == "hunter22" and bank[0]["fields"]["4"] == "alice",
+          f"entry changed: {bank}")
 
     d.key("tab")
     st = d.screen("menu", "Secret")
@@ -612,6 +632,7 @@ def t18_tab_never_saves(d):
     d.screen("entry_view")
     check(len(d.dump()) == 1, "digit hotkey deleted the entry")
 
+    go_home(d)
     st = d.lock()
     fails = st["fails"]
     d.key("tab", 10)

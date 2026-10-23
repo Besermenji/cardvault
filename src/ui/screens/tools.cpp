@@ -1,6 +1,7 @@
 // Seed phrase entry, password generator, 2FA overview and clock setting.
 #include <M5Cardputer.h>
 
+#include "core/entry_rules.h"
 #include "core/mnemonic_entry.h"
 #include "features/base32.h"
 #include "features/bip39.h"
@@ -271,9 +272,9 @@ public:
             if (e.type != EntryType::Totp) continue;
             SBytes key;
             if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) continue;
-            int digits = atoi(e.get_or(kFieldTotpDigits, "6").c_str()) == 8 ? 8 : 6;
-            uint32_t period = uint32_t(atoi(e.get_or(kFieldTotpPeriod, "30").c_str()));
-            if (period < 10 || period > 300) period = 30;
+            int digits;
+            uint32_t period;
+            totp_settings(e, digits, period);
             char code[10];
             totp_format(totp(key.data(), key.size(), now, period, digits), digits, code);
             if (!first) out += "|";
@@ -332,9 +333,9 @@ public:
                 text_small(c, 9, y + 14, "invalid secret", color::bad);
                 continue;
             }
-            int digits = atoi(e->get_or(kFieldTotpDigits, "6").c_str()) == 8 ? 8 : 6;
-            uint32_t period = uint32_t(atoi(e->get_or(kFieldTotpPeriod, "30").c_str()));
-            if (period < 10 || period > 300) period = 30;
+            int digits;
+            uint32_t period;
+            totp_settings(*e, digits, period);
             char code[10];
             totp_format(totp(key.data(), key.size(), now, period, digits), digits, code);
             uint32_t left = period - now % period;
@@ -375,6 +376,7 @@ void start_mnemonic_flow(const SString& current, TextDone done) {
     std::vector<MenuItem> items;
     auto box = std::make_shared<SecretBox>(current);
     int existing = int(bip39_split(current).size());
+    bool has_words = existing > 0;
     if (bip39_valid_word_count(existing)) {
         items.push_back({"Edit current words", [box, done, existing] {
                              app().router.push(make_mnemonic_input(existing, box->value, done));
@@ -388,20 +390,31 @@ void start_mnemonic_flow(const SString& current, TextDone done) {
     for (int n : {12, 24}) {
         char label[24];
         snprintf(label, sizeof label, "Generate %d words", n);
+        auto generate = [n, done] {
+            app().busy("Generating...");
+            SString words;
+            bip39_generate(n, words);
+            done(words);
+            wipe(words);
+            app().router.push(make_message(
+                "Write it down!",
+                "A new seed was generated with the hardware RNG. Save the "
+                "entry, then copy the words to paper as a backup.",
+                color::accent));
+        };
+        if (!has_words) {
+            items.push_back({label, generate, "RNG", color::accent});
+            continue;
+        }
+        // Replacing existing words: confirm, and a digit hotkey only selects it.
         items.push_back({label,
-                         [n, done] {
-                             app().busy("Generating...");
-                             SString words;
-                             bip39_generate(n, words);
-                             done(words);
-                             wipe(words);
-                             app().router.push(make_message(
-                                 "Write it down!",
-                                 "A new seed was generated with the hardware RNG. Save the "
-                                 "entry, then copy the words to paper as a backup.",
-                                 color::accent));
+                         [generate] {
+                             app().router.push(make_confirm(
+                                 "Replace seed words?",
+                                 "The new words replace the current ones when you save.", generate,
+                                 color::bad));
                          },
-                         "RNG", color::accent});
+                         "RNG", color::accent, true});
     }
     items.push_back({"Free text (non-BIP39)", [box, done] {
                          InputOpts o;
