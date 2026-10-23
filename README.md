@@ -33,8 +33,20 @@ put the Cardputer in download mode (power off, hold <kbd>G0</kbd>, plug USB-C) a
 esptool.py --chip esp32s3 write_flash 0x0 cardvault-vX.Y.Z-cardputer-adv.bin
 ```
 
-**M5Burner / Launcher:** search for *CardVault* in M5Burner's Cardputer section, or install it from
-[Launcher](https://github.com/bmorcelli/Launcher)'s OTA list.
+**M5Burner:** search for *CardVault* in M5Burner's Cardputer section.
+
+**Next to other firmware (Launcher):** flash [Launcher](https://github.com/bmorcelli/Launcher), copy
+`cardvault-vX.Y.Z-cardputer-adv.bin` to the SD card and install it from Launcher's SD menu. Launcher
+creates a separate `vault` storage area for CardVault, so other firmware's storage never overlaps it.
+Press <kbd>Enter</kbd>/<kbd>G0</kbd> while booting to get back to Launcher and switch firmware.
+
+On the first start after installing through Launcher, CardVault asks to **set up its storage area**. Say
+**Y**: it only formats CardVault's own `vault` area and **doesn't touch Launcher or any other firmware**
+installed on the device.
+
+> ⚠️ Any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter.
+> Only install firmware you trust next to it, use a strong passphrase, and keep SD backups. Removing
+> CardVault in Launcher may delete its storage area.
 
 **From source:**
 

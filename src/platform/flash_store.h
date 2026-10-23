@@ -1,4 +1,6 @@
 // Vault blob on the internal flash ("vault" LittleFS partition).
+// begin() returns false when the partition is missing or not mountable;
+// has_partition() tells the two apart.
 #pragma once
 
 #include "vault/storage.h"
@@ -19,6 +21,7 @@ public:
     // Erases the entire partition (all blocks), then reformats it.
     bool erase() override;
     bool mounted() const { return mounted_; }
+    static bool has_partition();
 
 private:
     bool mounted_ = false;

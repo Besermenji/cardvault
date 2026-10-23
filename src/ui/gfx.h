@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "crypto/secure.h"
+#include "ui/textwrap.h"
 #include "ui/theme.h"
 #include "vault/model.h"
 
@@ -25,19 +26,10 @@ void progress(Canvas& c, int x, int y, int w, int h, float frac, uint16_t fg);
 void dialog(Canvas& c, const char* title, const char* msg, uint16_t accent);
 // Draws a scroll indicator on the right edge.
 void scrollbar(Canvas& c, int first, int visible, int total);
-// Word-wraps text into lines of at most `cols` characters. Each line is a
-// (start, length) pair into `text`; explicit '\n' always breaks.
-struct Line {
-    size_t start;
-    size_t len;
-};
-std::vector<Line> wrap(const char* text, size_t n, int cols, bool hard = false);
 // Draws `len` mask glyphs.
 void mask(Canvas& c, int x, int y, size_t len, int max_cols);
 void text_small(Canvas& c, int x, int y, const char* s, uint16_t col = color::dim);
 void text_mono(Canvas& c, int x, int y, const char* s, uint16_t col = color::text);
-// Truncates with "..." so it fits in `cols` monospace columns.
-SString fit(const SString& s, int cols);
 
 }  // namespace ui
 }  // namespace cv

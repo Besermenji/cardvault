@@ -13,6 +13,13 @@ constexpr int kCols = (kW - 12) / kMonoW;  // 28
 
 class TextInputScreen : public Screen {
 public:
+    const char* name() const override { return "text_input"; }
+    const char* title() const override { return title_; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "len=" + std::to_string(buf_.size()) + " reveal=" + std::to_string(reveal_);
+    }
+#endif
     TextInputScreen(const char* title, const SString& initial, InputOpts o, TextDone done)
         : title_(title), buf_(initial), cur_(initial.size()), o_(o), done_(std::move(done)) {}
     ~TextInputScreen() override { wipe(buf_); }
@@ -138,33 +145,12 @@ private:
     }
 
     void locate(const std::vector<Line>& lines, int& line, size_t& col) const {
-        for (size_t i = 0; i < lines.size(); i++) {
-            const Line& l = lines[i];
-            bool last = i + 1 == lines.size();
-            if (cur_ >= l.start && (cur_ < l.start + l.len || (cur_ == l.start + l.len &&
-                                                               (last || lines[i + 1].start > cur_)))) {
-                line = int(i);
-                col = cur_ - l.start;
-                if (col >= size_t(kCols) && !last) {  // exactly full line: cursor on next
-                    line = int(i) + 1;
-                    col = 0;
-                }
-                return;
-            }
-        }
-        line = int(lines.size()) - 1;
-        col = lines.back().len;
+        cursor_locate(lines, cur_, kCols, line, col);
     }
 
     void move_line(int delta) {
         auto lines = wrap(buf_.data(), buf_.size(), kCols, true);
-        int line;
-        size_t col;
-        locate(lines, line, col);
-        int target = line + delta;
-        if (target < 0 || target >= int(lines.size())) return;
-        const Line& l = lines[target];
-        cur_ = l.start + (col < l.len ? col : l.len);
+        cur_ = cursor_move_line(lines, cur_, kCols, delta);
     }
 
     const char* title_;
@@ -179,6 +165,17 @@ private:
 
 class MenuScreen : public Screen {
 public:
+    const char* name() const override { return "menu"; }
+    const char* title() const override { return title_; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override {
+        out = "sel=" + std::to_string(sel_) + " items=";
+        for (size_t i = 0; i < items_.size(); i++) {
+            if (i) out += "|";
+            out += items_[i].label.c_str();
+        }
+    }
+#endif
     MenuScreen(const char* title, std::vector<MenuItem> items)
         : title_(title), items_(std::move(items)) {}
 
@@ -241,6 +238,11 @@ private:
 
 class DialogScreen : public Screen {
 public:
+    const char* name() const override { return confirm_ ? "confirm" : "message"; }
+    const char* title() const override { return title_.c_str(); }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override { out = std::string("msg=") + msg_.c_str(); }
+#endif
     DialogScreen(const char* title, const char* msg, uint16_t accent, bool confirm,
                  std::function<void()> yes)
         : title_(title), msg_(msg), accent_(accent), confirm_(confirm), yes_(std::move(yes)) {}

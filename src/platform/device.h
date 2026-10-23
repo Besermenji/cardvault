@@ -5,6 +5,14 @@
 
 #include "crypto/kdf.h"
 
+// NVS namespaces. Test builds override them so they never touch real state.
+#ifndef CV_NVS_GUARD
+#define CV_NVS_GUARD "cv_guard"
+#endif
+#ifndef CV_NVS_CFG
+#define CV_NVS_CFG "cv_cfg"
+#endif
+
 namespace cv {
 
 struct Settings {

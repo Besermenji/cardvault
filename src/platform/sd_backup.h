@@ -15,6 +15,7 @@ void unmount();
 bool write_backup(const std::vector<uint8_t>& image, std::string& name);
 std::vector<std::string> list_backups();  // newest first
 bool read_backup(const std::string& name, std::vector<uint8_t>& out);
+bool remove_backup(const std::string& name);
 
 }  // namespace sd
 

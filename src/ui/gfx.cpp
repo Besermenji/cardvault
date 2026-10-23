@@ -130,34 +130,6 @@ void scrollbar(Canvas& c, int first, int visible, int total) {
     c.fillRect(x, ty, 2, th, color::dim);
 }
 
-std::vector<Line> wrap(const char* text, size_t n, int cols, bool hard) {
-    std::vector<Line> lines;
-    size_t start = 0;
-    while (start <= n) {
-        size_t end = start;
-        size_t last_space = SIZE_MAX;
-        while (end < n && text[end] != '\n' && int(end - start) < cols) {
-            if (text[end] == ' ') last_space = end;
-            end++;
-        }
-        if (end < n && text[end] != '\n' && int(end - start) >= cols && !hard &&
-            last_space != SIZE_MAX && last_space > start) {
-            lines.push_back({start, last_space - start});
-            start = last_space + 1;
-            continue;
-        }
-        lines.push_back({start, end - start});
-        if (end >= n) break;
-        start = (text[end] == '\n') ? end + 1 : end;
-        if (start == n && text[n - 1] == '\n') {
-            lines.push_back({n, 0});
-            break;
-        }
-    }
-    if (lines.empty()) lines.push_back({0, 0});
-    return lines;
-}
-
 void mask(Canvas& c, int x, int y, size_t len, int max_cols) {
     size_t n = len < size_t(max_cols) ? len : size_t(max_cols);
     for (size_t i = 0; i < n; i++) c.fillCircle(x + int(i) * kMonoW + 4, y + 8, 2, color::dim);
@@ -173,12 +145,6 @@ void text_mono(Canvas& c, int x, int y, const char* s, uint16_t col) {
     c.setFont(CV_FONT_MONO);
     c.setTextColor(col);
     c.drawString(s, x, y);
-}
-
-SString fit(const SString& s, int cols) {
-    if (int(s.size()) <= cols) return s;
-    if (cols <= 3) return s.substr(0, cols);
-    return s.substr(0, cols - 3) + "...";
 }
 
 }  // namespace ui

@@ -102,7 +102,18 @@ bool poll_key(Key& out) {
     return true;
 }
 
+#ifdef CV_TEST_HOOKS
+namespace {
+char g_held_override = 0;
+}
+void inject_key(const Key& k) { g_queue.push_back(k); }
+void set_held_override(char c, bool held) { g_held_override = held ? c : 0; }
+bool key_held(char c) {
+    return (g_held_override && g_held_override == c) || M5Cardputer.Keyboard.isKeyPressed(c);
+}
+#else
 bool key_held(char c) { return M5Cardputer.Keyboard.isKeyPressed(c); }
+#endif
 
 }  // namespace ui
 }  // namespace cv

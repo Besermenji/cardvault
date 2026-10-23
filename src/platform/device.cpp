@@ -22,7 +22,7 @@ void radios_off() {
 Settings load_settings() {
     Settings s;
     Preferences p;
-    if (p.begin("cfg", true)) {
+    if (p.begin(CV_NVS_CFG, true)) {
         s.autolock_s = p.getUInt("autolock", s.autolock_s);
         s.brightness = p.getUInt("bright", s.brightness);
         p.end();
@@ -32,7 +32,7 @@ Settings load_settings() {
 
 void save_settings(const Settings& s) {
     Preferences p;
-    if (!p.begin("cfg", false)) return;
+    if (!p.begin(CV_NVS_CFG, false)) return;
     p.putUInt("autolock", s.autolock_s);
     p.putUInt("bright", s.brightness);
     p.end();

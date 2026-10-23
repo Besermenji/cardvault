@@ -24,7 +24,9 @@ CardVault protects secrets stored on an M5Stack Cardputer ADV.
   brute-forces the passphrase **offline**. Without ESP32 secure boot + flash encryption
   (irreversible eFuse changes, not enabled by default), the attempt limit can be bypassed
   this way. **A long, random passphrase is your real protection** (e.g. 5+ diceware words).
-- Malicious firmware flashed onto your device before you type your passphrase.
+- Malicious firmware flashed onto your device before you type your passphrase. This includes other
+  firmware installed next to CardVault with Launcher: it can read the encrypted vault (enabling offline
+  guessing) and reset the attempt counter stored in the shared NVS partition.
 - Someone watching your screen or keyboard while you unlock or reveal secrets.
 - Losing the device without a backup. Always keep an independent backup of seed phrases.
 

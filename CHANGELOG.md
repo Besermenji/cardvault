@@ -6,6 +6,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
+  gone, so CardVault can run safely next to other firmware installed with Launcher.
+- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
+
 ### Security
 - Restoring an SD backup while locked could reset the wrong-passphrase counter without replacing
   the vault, allowing unlimited guesses. The counter now resets only after a restore completes.

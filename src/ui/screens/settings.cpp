@@ -2,6 +2,7 @@
 #include <M5Cardputer.h>
 #include <esp_heap_caps.h>
 
+#include "core/flows.h"
 #include "platform/sd_backup.h"
 #include "ui/app.h"
 #include "version.h"
@@ -72,6 +73,10 @@ void show_about() {
 
 class SettingsScreen : public Screen {
 public:
+    const char* name() const override { return "settings"; }
+#ifdef CV_TEST_HOOKS
+    void debug(std::string& out) const override { out = "sel=" + std::to_string(sel_); }
+#endif
     void on_key(const Key& k) override {
         invalidate();
         if (k.back()) {
@@ -173,50 +178,36 @@ void restore_from(const std::string& name) {
     o.hint = "Passphrase used when this backup was made";
     app().router.push(make_text_input("Backup passphrase", "", o, [image](SString& pass) {
         App& a = app();
-        // While locked, guesses here count against the wipe limit like the
-        // unlock screen, so restore cannot be used to brute-force.
-        bool counted = !a.session.is_open();
-        if (counted && !a.guard.begin_attempt()) {
-            if (a.guard.exhausted()) a.wipe_and_reboot("Too many wrong passphrases.");
-            a.toast("Storage error", color::bad);
-            return;
-        }
         a.busy("Decrypting backup...");
-        VaultSession tmp;
-        VaultError e = tmp.unlock_bytes(*image, pass);
-        size_t count = tmp.data().entries.size();
-        tmp.close();
-        if (e != VaultError::Ok) {
-            if (e != VaultError::WrongPassphrase && counted) a.guard.refund();
-            if (counted && a.guard.exhausted())
+        RestoreCheck r = restore_check(a.guard, !a.session.is_open(), *image, pass);
+        switch (r.kind) {
+            case RestoreCheck::MustWipe:
                 a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
-            a.router.push(make_message("Restore failed", vault_error_str(e), color::bad));
-            return;
+            case RestoreCheck::Refused:
+                a.toast("Storage error", color::bad);
+                return;
+            case RestoreCheck::Wrong:
+            case RestoreCheck::Failed:
+                a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
+                return;
+            case RestoreCheck::Ok:
+                break;
         }
-        // Knowing a backup's passphrase proves nothing about the device vault,
-        // so only undo this attempt. The counter is reset once the vault has
-        // actually been replaced (which destroys the old one).
-        if (counted) a.guard.refund();
         auto box = std::make_shared<SecretBox>(pass);
         char msg[120];
         snprintf(msg, sizeof msg,
                  "Replace the vault on this device with the backup (%u secrets)? The current "
                  "vault will be overwritten.",
-                 unsigned(count));
+                 unsigned(r.entries));
         a.router.push(make_confirm("Replace vault?", msg, [image, box] {
             App& a = app();
             a.busy("Restoring...");
-            if (!a.store.write(*image)) {
-                a.toast("Storage error", color::bad, 3000);
-                return;
-            }
-            VaultError e = a.session.unlock_bytes(*image, box->value);
+            VaultError e = restore_commit(a.guard, a.session, a.store, *image, box->value);
             if (e != VaultError::Ok) {
                 a.lock();
                 a.toast(vault_error_str(e), color::bad, 3000);
                 return;
             }
-            a.guard.reset();
             a.router.reset(make_home());
             a.toast("Backup restored");
         }, color::bad));

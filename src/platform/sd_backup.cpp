@@ -78,5 +78,10 @@ bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
     return n == out.size();
 }
 
+bool remove_backup(const std::string& name) {
+    if (!mount()) return false;
+    return SD.remove((std::string(kDir) + "/" + name).c_str());
+}
+
 }  // namespace sd
 }  // namespace cv

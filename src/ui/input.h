@@ -34,5 +34,11 @@ bool poll_key(Key& out);
 // True while the physical key that produces `c` is held down.
 bool key_held(char c);
 
+#ifdef CV_TEST_HOOKS
+// Test builds only: queue a synthetic key event / simulate a held key.
+void inject_key(const Key& k);
+void set_held_override(char c, bool held);
+#endif
+
 }  // namespace ui
 }  // namespace cv
