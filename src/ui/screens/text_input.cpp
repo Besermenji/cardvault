@@ -188,13 +188,15 @@ public:
             sel_ = (sel_ + n - 1) % n;
         } else if (k.down()) {
             sel_ = (sel_ + 1) % n;
-        } else if (k.is(KeyCode::Enter) || k.is(KeyCode::Tab)) {
+        } else if (k.is(KeyCode::Enter)) {
             auto action = items_[sel_].action;
             app().router.pop();
             if (action) action();
         } else if (k.code == KeyCode::Char && k.ch >= '1' && k.ch <= '9') {
             int i = k.ch - '1';
-            if (i < n) {
+            if (i < n && items_[i].destructive) {
+                sel_ = i;
+            } else if (i < n) {
                 auto action = items_[i].action;
                 app().router.pop();
                 if (action) action();

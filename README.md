@@ -60,7 +60,8 @@ pio run -e cardputer -t upload
 |---|---|
 | <kbd>fn</kbd> + <kbd>;</kbd> <kbd>.</kbd> <kbd>,</kbd> <kbd>/</kbd> | Up / Down / Left / Right (plain <kbd>;</kbd> <kbd>.</kbd> work in lists) |
 | <kbd>Enter</kbd> | Open / confirm |
-| <kbd>Tab</kbd> | Menu / save |
+| <kbd>Tab</kbd> | Open the menu; in the editor, jump to *Save* (<kbd>Enter</kbd> saves) |
+| <kbd>1</kbd>–<kbd>9</kbd> | Pick a menu item (destructive items are only selected; confirm with <kbd>Enter</kbd>) |
 | <kbd>fn</kbd> + <kbd>`</kbd> (or <kbd>`</kbd> in lists) | Back / cancel |
 | <kbd>opt</kbd> | Show/hide the passphrase while typing |
 | hold <kbd>Space</kbd> / <kbd>R</kbd> | Reveal the selected secret / toggle reveal all |

@@ -2,6 +2,7 @@
 #include <M5Cardputer.h>
 
 #include <algorithm>
+#include <cctype>
 
 #include "core/entry_rules.h"
 #include "features/base32.h"
@@ -13,6 +14,10 @@ namespace cv {
 namespace ui {
 
 namespace {
+
+bool is_blank(const SString& s) {
+    return std::all_of(s.begin(), s.end(), [](char c) { return isspace(uint8_t(c)) != 0; });
+}
 
 bool icontains(const SString& hay, const SString& needle) {
     if (needle.empty()) return true;
@@ -304,7 +309,7 @@ private:
                                  },
                                  color::bad));
                          },
-                         "", color::bad});
+                         "", color::bad, true});
         app().router.push(make_menu("Secret", std::move(items)));
     }
 
@@ -358,7 +363,7 @@ public:
         } else if (k.down()) {
             sel_ = (sel_ + 1) % rows;
         } else if (k.is(KeyCode::Tab)) {
-            save();
+            sel_ = rows - 1;  // Tab only moves to Save; Enter there saves
         } else if (k.is('g') && sel_ > 0 && sel_ <= nf && fields[sel_ - 1] == kFieldPassword) {
             generate();
         } else if (k.left() || k.right()) {
@@ -408,7 +413,7 @@ public:
             wipe(v);
         }
         scrollbar(c, first_, visible, rows);
-        footer(c, "ENTER edit  TAB save  ` cancel");
+        footer(c, "ENTER edit  TAB to save  ` cancel");
     }
 
 private:
@@ -427,10 +432,7 @@ private:
             return;
         }
         if (f == kFieldWords) {
-            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) {
-                draft_.set(kFieldWords, v);
-                dirty_ = true;
-            });
+            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) { set_field(kFieldWords, v); });
             return;
         }
         InputOpts o;
@@ -438,9 +440,25 @@ private:
         o.mask = f == kFieldPassword || f == kFieldBip39Pass;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
         app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
+            set_field(f, v);
+        }));
+    }
+
+    // Stores a field value, asking first when it would clear a stored one.
+    void set_field(uint8_t f, const SString& v) {
+        if (!is_blank(v) || is_blank(draft_.get_or(f))) {
             draft_.set(f, v);
             dirty_ = true;
-        }));
+            return;
+        }
+        char title[32];
+        snprintf(title, sizeof title, "Clear %s?", field_label(f));
+        app().router.push(make_confirm(title, "The stored value is removed when you save.",
+                                       [this, f] {
+                                           draft_.set(f, SString());
+                                           dirty_ = true;
+                                       },
+                                       color::warn));
     }
 
     void cycle(uint8_t f, bool fwd) {
@@ -462,7 +480,8 @@ private:
     }
 
     void save() {
-        if (const char* err = finalize_entry(draft_)) {
+        const char* warning = nullptr;
+        if (const char* err = finalize_entry(draft_, &warning)) {
             app().toast(err, color::bad);
             return;
         }
@@ -494,7 +513,7 @@ private:
         }
         previous.clear();
         dirty_ = false;
-        app().toast("Saved");
+        app().toast(warning ? warning : "Saved", warning ? color::warn : color::good);
         app().router.pop();
         if (!id_) app().router.push(make_entry_view(id));
     }

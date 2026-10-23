@@ -227,7 +227,7 @@ private:
                                      app().toast("Not erased", color::warn);
                                  }));
                          },
-                         "", color::bad});
+                         "", color::bad, true});
         app().router.push(make_menu("Options", std::move(items)));
     }
 

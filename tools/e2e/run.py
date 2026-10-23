@@ -144,12 +144,9 @@ class Device:
         items = info(st)["items"].split("|")
         if label not in items:
             raise Fail(f"menu '{st['title']}' has no '{label}': {items}")
-        i = items.index(label)
-        if i < 9:
-            self.key(str(i + 1))
-        else:
-            self.key("down", i)
-            self.key("enter")
+        # Arrow keys + ENTER: digit hotkeys only select destructive items.
+        self.key("down", items.index(label))
+        self.key("enter")
 
     def unlock(self, pw):
         self.screen("unlock")
@@ -204,6 +201,11 @@ def new_entry(d, type_label):
     d.menu_pick("New secret")
     d.menu_pick(type_label)
     return d.screen("entry_edit")
+
+
+def save_entry(d):
+    d.key("tab")  # TAB only moves to the Save row
+    d.key("enter")
 
 
 def set_title(d, title):
@@ -262,7 +264,7 @@ def t03_add_note_multiline(d):
     d.type("eggs")
     d.key("tab")
     d.screen("entry_edit")
-    d.key("tab")  # save
+    save_entry(d)
     d.screen("entry_view")
     notes = [e for e in d.dump() if e["title"] == "Shopping"]
     check(len(notes) == 1 and notes[0]["fields"]["1"] == "milk\neggs", f"note not saved: {notes}")
@@ -282,7 +284,7 @@ def t04_add_seed_with_autocomplete(d):
     d.type("abou")
     d.toast("Checksum OK")
     d.screen("entry_edit")
-    d.key("tab")
+    save_entry(d)
     d.screen("entry_view")
     seeds = [e for e in d.dump() if e["title"] == "Cold wallet"]
     expected = " ".join(["abandon"] * 11 + ["about"])
@@ -346,15 +348,16 @@ def t07_totp_validation_and_code(d):
     d.screen("text_input", "Secret (base32)")
     d.type("not-base32!")
     d.key("enter")
-    d.key("tab")
+    save_entry(d)
     d.toast("not valid base32")
     d.screen("entry_edit")
+    d.key("up", 3)  # Save -> Secret
     d.key("enter")
     d.screen("text_input", "Secret (base32)")
     d.key("bs", 11)
     d.type(TOTP_SECRET)
     d.key("enter")
-    d.key("tab")
+    save_entry(d)
     d.screen("entry_view")
     go_home(d)
     d.key("tab")
@@ -379,7 +382,7 @@ def t08_password_generator_to_entry(d):
     d.key("tab")
     d.screen("entry_edit")
     set_title(d, "Email")
-    d.key("tab")
+    save_entry(d)
     d.screen("entry_view")
     pw = [e for e in d.dump() if e["title"] == "Email"]
     check(pw and pw[0]["fields"]["5"] == v2, f"generated password not stored: {pw}")
@@ -544,6 +547,78 @@ def t17_erase_from_settings(d):
     d.restart_cmd("key enter")  # erases, reboots and reconnects
     st = d.screen("setup", timeout=40)
     check(d.dump() == [] and st["fails"] == 0, f"vault not erased: {st}")
+
+
+def t18_tab_never_saves(d):
+    # Regression #31: TAB walked menus and saved empty entries.
+    d.screen("setup")
+    d.key("tab", 10)
+    st = d.state()
+    check(not st["open"] and st["fails"] == 0, f"TAB on setup changed state: {st}")
+    for _ in range(4):
+        if d.state()["screen"] == "setup":
+            break
+        d.key("esc")
+    t02_setup_validation_and_create(d)
+
+    d.key("tab", 10)
+    st = d.screen("menu", "Menu")
+    check(st["entries"] == 0, f"TAB from home saved something: {st}")
+    go_home(d)
+
+    new_entry(d, "Note")
+    d.key("tab", 5)
+    st = d.screen("entry_edit")
+    check(info(st)["sel"] == "2", f"TAB should move to the Save row: {st}")
+    check(d.dump() == [], "TAB in the editor saved an entry")
+    d.key("enter")
+    d.toast("Text is empty")
+    d.key("esc")
+    st = d.screen("home")
+    check(st["entries"] == 0, f"empty note was saved: {st}")
+
+    new_entry(d, "Password")
+    d.key("down", 2)
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type("hunter22")
+    d.key("enter")
+    set_title(d, "Bank")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("down", 2)
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.key("bs", 8)
+    d.key("enter")
+    d.screen("confirm", "Clear Password?")
+    d.key("n")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"declined clear must not change the draft: {st}")
+    d.key("esc")
+    d.screen("entry_view")
+    bank = [e for e in d.dump() if e["title"] == "Bank"]
+    check(bank and bank[0]["fields"]["5"] == "hunter22", f"password changed: {bank}")
+
+    d.key("tab")
+    st = d.screen("menu", "Secret")
+    items = info(st)["items"].split("|")
+    d.key(str(items.index("Delete") + 1))
+    st = d.screen("menu", "Secret")
+    check(info(st)["sel"] == str(items.index("Delete")), f"digit should only select Delete: {st}")
+    d.key("esc")
+    d.screen("entry_view")
+    check(len(d.dump()) == 1, "digit hotkey deleted the entry")
+
+    st = d.lock()
+    fails = st["fails"]
+    d.key("tab", 10)
+    st = d.screen("menu", "Options")
+    check(st["fails"] == fails and not st["open"], f"TAB on the lock screen: {st}")
+    d.key("esc")
+    d.unlock(P1)
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]

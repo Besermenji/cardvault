@@ -245,6 +245,7 @@ void test_fit() {
 void test_finalize_default_titles() {
     Entry n;
     n.type = EntryType::Mnemonic;
+    n.set(kFieldWords, "abandon about");
     TEST_ASSERT_NULL(finalize_entry(n));
     TEST_ASSERT_EQUAL_STRING("Seed phrase", n.title.c_str());
     Entry t;
@@ -256,7 +257,8 @@ void test_finalize_default_titles() {
     Entry keep;
     keep.type = EntryType::Note;
     keep.title = "Mine";
-    finalize_entry(keep);
+    keep.set(kFieldBody, "text");
+    TEST_ASSERT_NULL(finalize_entry(keep));
     TEST_ASSERT_EQUAL_STRING("Mine", keep.title.c_str());
 }
 
@@ -267,6 +269,87 @@ void test_finalize_rejects_bad_totp_secret() {
     t.set(kFieldTotpSecret, "not base32!");
     TEST_ASSERT_NOT_NULL(finalize_entry(t));
     t.set(kFieldTotpSecret, "jbsw y3dp ehpk 3pxp");  // spaces + lowercase are fine
+    TEST_ASSERT_NULL(finalize_entry(t));
+}
+
+// Regression #31: Tab used to save entries with nothing in them.
+void test_finalize_rejects_empty_defining_field() {
+    const struct {
+        EntryType type;
+        uint8_t field;
+    } cases[] = {{EntryType::Note, kFieldBody},
+                 {EntryType::Mnemonic, kFieldWords},
+                 {EntryType::Password, kFieldPassword},
+                 {EntryType::Totp, kFieldTotpSecret}};
+    for (auto& c : cases) {
+        Entry e;
+        e.type = c.type;
+        e.title = "Has a title";
+        e.set(kFieldNotes, "other fields do not count");
+        e.set(kFieldUser, "alice");
+        TEST_ASSERT_NOT_NULL(finalize_entry(e));  // missing
+        e.set(c.field, "");
+        TEST_ASSERT_NOT_NULL(finalize_entry(e));  // empty
+        e.set(c.field, " \n\t ");
+        TEST_ASSERT_NOT_NULL(finalize_entry(e));  // whitespace only
+    }
+}
+
+void test_finalize_trims_but_keeps_passwords_verbatim() {
+    Entry p;
+    p.type = EntryType::Password;
+    p.title = "  Email \n";
+    p.set(kFieldUser, " alice ");
+    p.set(kFieldPassword, " pa ss ");
+    TEST_ASSERT_NULL(finalize_entry(p));
+    TEST_ASSERT_EQUAL_STRING("Email", p.title.c_str());
+    TEST_ASSERT_EQUAL_STRING("alice", p.get_or(kFieldUser).c_str());
+    TEST_ASSERT_EQUAL_STRING(" pa ss ", p.get_or(kFieldPassword).c_str());
+
+    Entry m;
+    m.type = EntryType::Mnemonic;
+    m.set(kFieldWords, "\n abandon about  ");
+    m.set(kFieldBip39Pass, " 25th ");
+    TEST_ASSERT_NULL(finalize_entry(m));
+    TEST_ASSERT_EQUAL_STRING("abandon about", m.get_or(kFieldWords).c_str());
+    TEST_ASSERT_EQUAL_STRING(" 25th ", m.get_or(kFieldBip39Pass).c_str());
+
+    Entry blank_title;
+    blank_title.type = EntryType::Note;
+    blank_title.title = "   ";
+    blank_title.set(kFieldBody, "x");
+    TEST_ASSERT_NULL(finalize_entry(blank_title));
+    TEST_ASSERT_EQUAL_STRING("Note", blank_title.title.c_str());
+}
+
+void test_finalize_totp_settings_and_short_secret_warning() {
+    Entry t;
+    t.type = EntryType::Totp;
+    const char* warning = "stale";
+    t.set(kFieldTotpSecret, "JBSWY3DPEHPK3PXP");  // 16 chars = 10 bytes
+    TEST_ASSERT_NULL(finalize_entry(t, &warning));
+    TEST_ASSERT_NULL(warning);
+    t.set(kFieldTotpSecret, "JBSWY3DP");  // 8 chars: saved with a warning
+    TEST_ASSERT_NULL(finalize_entry(t, &warning));
+    TEST_ASSERT_NOT_NULL(warning);
+    TEST_ASSERT_NULL(finalize_entry(t));  // warning pointer is optional
+
+    t.set(kFieldTotpSecret, "JBSWY3DPEHPK3PXP");
+    t.set(kFieldTotpDigits, "8");
+    t.set(kFieldTotpPeriod, "60");
+    TEST_ASSERT_NULL(finalize_entry(t));
+    for (const char* d : {"7", "", "6x", "-6"}) {
+        t.set(kFieldTotpDigits, d);
+        TEST_ASSERT_NOT_NULL_MESSAGE(finalize_entry(t), d);
+    }
+    t.set(kFieldTotpDigits, "6");
+    for (const char* p : {"5", "301", "abc", "", "99999"}) {
+        t.set(kFieldTotpPeriod, p);
+        TEST_ASSERT_NOT_NULL_MESSAGE(finalize_entry(t), p);
+    }
+    t.set(kFieldTotpPeriod, "10");
+    TEST_ASSERT_NULL(finalize_entry(t));
+    t.set(kFieldTotpPeriod, "300");
     TEST_ASSERT_NULL(finalize_entry(t));
 }
 
@@ -296,5 +379,8 @@ int main() {
     RUN_TEST(test_dialog_messages_fit_the_screen);
     RUN_TEST(test_finalize_default_titles);
     RUN_TEST(test_finalize_rejects_bad_totp_secret);
+    RUN_TEST(test_finalize_rejects_empty_defining_field);
+    RUN_TEST(test_finalize_trims_but_keeps_passwords_verbatim);
+    RUN_TEST(test_finalize_totp_settings_and_short_secret_warning);
     return UNITY_END();
 }
