@@ -325,4 +325,5 @@ void setup() {
     UNITY_END();
 }
 
-void loop() {}
+// Idle after the run; USB stays connected so the device can be reflashed.
+void loop() { delay(1000); }
