@@ -1,6 +1,7 @@
 // Navigation (router + routing decisions) and security flows.
 #include <unity.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
