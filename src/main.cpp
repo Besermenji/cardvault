@@ -2,6 +2,7 @@
 #include <M5Cardputer.h>
 
 #include "core/flows.h"
+#include "core/messages.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
 #include "test_hooks.h"
@@ -93,16 +94,13 @@ void setup() {
         case BootRoute::StorageUnreadable:
             // Never format a non-blank partition silently: it may hold a damaged
             // vault or another app's data.
-            a.router.reset(make_confirm(
-                "Storage not readable",
-                "The vault partition holds data CardVault cannot read. Format it? This destroys "
-                "anything stored there. (N = leave it alone)",
-                [] {
-                    app().busy("Formatting...");
-                    app().store.format();
-                    ESP.restart();
-                },
-                color::bad));
+            a.router.reset(make_confirm(msg::kStorageSetupTitle, msg::kStorageSetup,
+                                        [] {
+                                            app().busy("Setting up...");
+                                            app().store.format();
+                                            ESP.restart();
+                                        },
+                                        color::warn));
             break;
         case BootRoute::Wipe:
             // Power was cut between the last failed attempt and the wipe.

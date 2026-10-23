@@ -40,6 +40,10 @@ esptool.py --chip esp32s3 write_flash 0x0 cardvault-vX.Y.Z-cardputer-adv.bin
 creates a separate `vault` storage area for CardVault, so other firmware's storage never overlaps it.
 Press <kbd>Enter</kbd>/<kbd>G0</kbd> while booting to get back to Launcher and switch firmware.
 
+On the first start after installing through Launcher, CardVault asks to **set up its storage area**. Say
+**Y**: it only formats CardVault's own `vault` area and **doesn't touch Launcher or any other firmware**
+installed on the device.
+
 > ⚠️ Any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter.
 > Only install firmware you trust next to it, use a strong passphrase, and keep SD backups. Removing
 > CardVault in Launcher may delete its storage area.

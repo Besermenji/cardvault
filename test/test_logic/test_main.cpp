@@ -5,6 +5,7 @@
 #include <string>
 
 #include "core/entry_rules.h"
+#include "core/messages.h"
 #include "core/mnemonic_entry.h"
 #include "ui/textwrap.h"
 
@@ -269,6 +270,13 @@ void test_finalize_rejects_bad_totp_secret() {
     TEST_ASSERT_NULL(finalize_entry(t));
 }
 
+void test_dialog_messages_fit_the_screen() {
+    auto lines = wrap(msg::kStorageSetup, strlen(msg::kStorageSetup), msg::kDialogCols);
+    TEST_ASSERT_TRUE(int(lines.size()) <= msg::kDialogMaxLines);
+    TEST_ASSERT_NOT_NULL(strstr(msg::kStorageSetup, "NOT affected"));
+    TEST_ASSERT_TRUE(strlen(msg::kStorageSetupTitle) <= 20);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_mnemonic_autoaccepts_unique_four_letter_prefix);
@@ -285,6 +293,7 @@ int main() {
     RUN_TEST(test_cursor_locate_and_move);
     RUN_TEST(test_cursor_on_exactly_full_line);
     RUN_TEST(test_fit);
+    RUN_TEST(test_dialog_messages_fit_the_screen);
     RUN_TEST(test_finalize_default_titles);
     RUN_TEST(test_finalize_rejects_bad_totp_secret);
     return UNITY_END();
