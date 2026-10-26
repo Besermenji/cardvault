@@ -397,9 +397,8 @@ void test_wipe_string_clears_inline_buffer_and_dead_bytes() {
     wipe(s);
     TEST_ASSERT_TRUE(s.empty());
     // The inline buffer lives in the object; shrink_to_fit keeps it in place.
-    if (s.data() == buf) {
-        for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, uint8_t(buf[i]));
-    }
+    TEST_ASSERT_TRUE_MESSAGE(s.data() == buf, "precondition: the value stayed in the inline buffer");
+    for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, uint8_t(buf[i]));
 }
 
 void test_serialized_size_matches_serialize() {
