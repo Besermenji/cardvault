@@ -137,7 +137,28 @@ void test_pwgen_words_and_strength() {
     TEST_ASSERT_EQUAL_FLOAT(66.0, pwgen_words_bits(6));
     TEST_ASSERT_TRUE(passphrase_strength_bits("aaaaaaaa") < passphrase_strength_bits("q7#Lp2!x"));
     TEST_ASSERT_TRUE(passphrase_strength_bits("") == 0);
-    TEST_ASSERT_TRUE(passphrase_strength_bits("correct horse battery staple") > 60);
+    // Trivial patterns are weak however long they are.
+    TEST_ASSERT_TRUE(passphrase_strength_bits(SString(128, 'a')) < 40);
+    SString ab;
+    for (int i = 0; i < 20; i++) ab += "ab";
+    TEST_ASSERT_TRUE(passphrase_strength_bits(ab) < 40);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("qwertyuiop") < 40);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("abcdefghij") < 40);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("zxcvbnm,./") < 40);
+    // Case does not hide repeats or runs.
+    TEST_ASSERT_TRUE(passphrase_strength_bits("aBcDeFgHiJkL") < 40);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("AaAaAaAaAaAa") < 40);
+    // Word-like prose is capped at "fair", however it is separated or decorated.
+    TEST_ASSERT_TRUE(passphrase_strength_bits("the quick brown fox jumps over") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("the-quick-brown-fox-jumps-over-the-lazy-dog") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("thequickbrownfoxjumps1") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("The Quick Brown Fox Jumps 2024!") <= 50);
+    // Generated words get 11 bits per distinct word, joined by '-' or ' '.
+    TEST_ASSERT_EQUAL_FLOAT(66.0, passphrase_strength_bits("zoo-wrap-cable-ghost-lemon-tiger"));
+    TEST_ASSERT_EQUAL_FLOAT(66.0, passphrase_strength_bits("zoo wrap cable ghost lemon tiger"));
+    TEST_ASSERT_EQUAL_FLOAT(11.0, passphrase_strength_bits("abandon abandon abandon"));
+    // Random-looking mixed text still scores well.
+    TEST_ASSERT_TRUE(passphrase_strength_bits("q7#Lp2!xV9$mTz4&") > 60);
 }
 
 void test_time_parse_format() {

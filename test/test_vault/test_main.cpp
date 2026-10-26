@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "crypto/rng.h"
 #include "vault/serializer.h"
 #include "vault/session.h"
 
@@ -81,7 +82,7 @@ void test_create_unlock_round_trip() {
 void test_wrong_passphrase() {
     MemoryStore store;
     VaultSession s;
-    s.create(store, "right", kFast);
+    s.create(store, "right-passphrase", kFast);
     s.close();
     TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "wrong")));
     TEST_ASSERT_FALSE(s.is_open());
@@ -90,7 +91,7 @@ void test_wrong_passphrase() {
 void test_file_is_padded_and_has_no_plaintext() {
     MemoryStore store;
     VaultSession s;
-    s.create(store, "pw", kFast);
+    s.create(store, "pw-test-pass", kFast);
     Entry n = make_entry(EntryType::Note, "TitleMarker");
     n.set(kFieldBody, "SecretMarker");
     s.data().add(std::move(n));
@@ -105,7 +106,7 @@ void test_file_is_padded_and_has_no_plaintext() {
 void test_tamper_detection() {
     MemoryStore store;
     VaultSession s;
-    s.create(store, "pw", kFast);
+    s.create(store, "pw-test-pass", kFast);
     s.data().add(make_entry(EntryType::Note, "x"));
     s.save(store);
     s.close();
@@ -114,47 +115,47 @@ void test_tamper_detection() {
     // Flip one bit in the ciphertext body.
     store.blob = good;
     store.blob.back() ^= 1;
-    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(s.unlock(store, "pw-test-pass")));
     // Flip one bit in the salt (part of authenticated params).
     store.blob = good;
     store.blob[20] ^= 1;
-    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pw-test-pass")));
     // Flip one bit in the wrapped key's MAC.
     store.blob = good;
     store.blob[100] ^= 1;
-    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pw-test-pass")));
     // Flip the body nonce.
     store.blob = good;
     store.blob[kHeaderSize] ^= 1;
-    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(s.unlock(store, "pw-test-pass")));
     // Bad magic / truncation.
     store.blob = good;
     store.blob[0] = 'X';
-    TEST_ASSERT_EQUAL(int(VaultError::BadMagic), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::BadMagic), int(s.unlock(store, "pw-test-pass")));
     store.blob = good;
     store.blob.resize(50);
-    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(s.unlock(store, "pw-test-pass")));
     // Original still opens.
     store.blob = good;
-    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "pw-test-pass")));
 }
 
 void test_change_passphrase() {
     MemoryStore store;
     VaultSession s;
-    s.create(store, "old", kFast);
+    s.create(store, "old-passphrase", kFast);
     s.data().add(make_entry(EntryType::Note, "keep me"));
     s.save(store);
-    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.change_passphrase(store, "new", kFast)));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.change_passphrase(store, "new-passphrase", kFast)));
     s.close();
-    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "old")));
-    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "new")));
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "old-passphrase")));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "new-passphrase")));
     TEST_ASSERT_EQUAL_STRING("keep me", s.data().entries[0].title.c_str());
     // Saving after the change keeps working with the new key.
     s.data().add(make_entry(EntryType::Note, "second"));
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.save(store)));
     s.close();
-    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "new")));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "new-passphrase")));
     TEST_ASSERT_EQUAL(2, s.data().entries.size());
 }
 
@@ -175,10 +176,79 @@ void test_export_and_restore_backup() {
     TEST_ASSERT_EQUAL_STRING("backed up", r.data().entries[0].title.c_str());
 }
 
+void test_passphrase_policy() {
+    const SString bad[] = {"", "1234567", SString(129, 'x'), "        ", "\t\n \r \t\n \r"};
+    for (const SString& pw : bad) {
+        MemoryStore store;
+        VaultSession s;
+        TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase), int(s.create(store, pw, kFast)));
+        TEST_ASSERT_FALSE(s.is_open());
+        TEST_ASSERT_TRUE(store.blob.empty());
+
+        // An open vault refuses the weak passphrase for change and export,
+        // and the stored vault keeps its old passphrase.
+        TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.create(store, "old-passphrase", kFast)));
+        std::vector<uint8_t> before = store.blob;
+        TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase),
+                          int(s.change_passphrase(store, pw, kFast)));
+        TEST_ASSERT_TRUE(before == store.blob);
+        std::vector<uint8_t> image;
+        TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase), int(s.export_image(pw, kFast, image)));
+        TEST_ASSERT_TRUE(image.empty());
+        s.close();
+        TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "old-passphrase")));
+    }
+    // Boundaries are accepted.
+    for (size_t len : {kMinPassphraseLen, kMaxPassphraseLen}) {
+        MemoryStore store;
+        VaultSession s;
+        TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.create(store, SString(len, 'k'), kFast)));
+    }
+}
+
+// A vault image sealed the way create() did before the policy existed, so it
+// can carry a passphrase shorter than 8 characters.
+static std::vector<uint8_t> legacy_image(const char* pass) {
+    Header h;
+    h.kdf = kFast;
+    header_new_salt(h);
+    uint8_t kek[32], dek[32];
+    TEST_ASSERT_TRUE(kdf_derive(kek, reinterpret_cast<const uint8_t*>(pass), strlen(pass), h.salt,
+                                h.kdf));
+    rng_fill(dek, 32);
+    header_wrap(h, kek, dek);
+    VaultData d;
+    d.add(make_entry(EntryType::Note, "old vault"));
+    SBytes payload;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(serialize(d, payload)));
+    std::vector<uint8_t> out;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok),
+                      int(seal_file(h, dek, payload.data(), payload.size(), out)));
+    return out;
+}
+
+void test_unlock_empty_and_legacy_short_passphrases() {
+    // Vaults and backups made before the policy still open with their own
+    // short passphrase, from flash and from an image.
+    MemoryStore store;
+    store.write(legacy_image("pw"));
+    VaultSession s;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL_STRING("old vault", s.data().entries[0].title.c_str());
+    s.close();
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock_bytes(store.blob, "pw")));
+    s.close();
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pz")));
+    // Empty is refused outright, with its own error.
+    TEST_ASSERT_EQUAL(int(VaultError::EmptyPassphrase), int(s.unlock_bytes(store.blob, "")));
+    TEST_ASSERT_EQUAL(int(VaultError::EmptyPassphrase), int(s.unlock(store, "")));
+    TEST_ASSERT_FALSE(s.is_open());
+}
+
 void test_too_large_rejected() {
     MemoryStore store;
     VaultSession s;
-    s.create(store, "pw", kFast);
+    s.create(store, "pw-test-pass", kFast);
     for (int i = 0; i < 4; i++) {
         Entry n = make_entry(EntryType::Note, "big");
         n.set(kFieldBody, SString(15000, 'a'));
@@ -207,6 +277,8 @@ int main() {
     RUN_TEST(test_tamper_detection);
     RUN_TEST(test_change_passphrase);
     RUN_TEST(test_export_and_restore_backup);
+    RUN_TEST(test_passphrase_policy);
+    RUN_TEST(test_unlock_empty_and_legacy_short_passphrases);
     RUN_TEST(test_too_large_rejected);
     RUN_TEST(test_remove_entry);
     return UNITY_END();

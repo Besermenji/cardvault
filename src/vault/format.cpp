@@ -31,8 +31,19 @@ const char* vault_error_str(VaultError e) {
         case VaultError::OutOfMemory: return "Out of memory";
         case VaultError::Io: return "Storage error";
         case VaultError::NotOpen: return "Vault locked";
+        case VaultError::EmptyPassphrase: return "Passphrase is empty";
+        case VaultError::WeakPassphrase: return "Use 8-128 characters, not only spaces";
     }
     return "Unknown error";
+}
+
+VaultError check_new_passphrase(const SString& pass) {
+    if (pass.size() < kMinPassphraseLen || pass.size() > kMaxPassphraseLen)
+        return VaultError::WeakPassphrase;
+    bool blank = true;
+    for (char c : pass)
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r') blank = false;
+    return blank ? VaultError::WeakPassphrase : VaultError::Ok;
 }
 
 void Header::encode(uint8_t out[kHeaderSize]) const {

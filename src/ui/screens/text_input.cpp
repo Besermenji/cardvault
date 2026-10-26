@@ -44,6 +44,7 @@ public:
                 if (cur_ > 0) {
                     buf_.erase(cur_ - 1, 1);
                     cur_--;
+                    strength_dirty_ = true;
                 }
                 return;
             case KeyCode::Left:
@@ -97,7 +98,12 @@ public:
         }
 
         if (o_.strength) {
-            double bits = passphrase_strength_bits(buf_);
+            // Recomputed only after an edit, not on every cursor blink.
+            if (strength_dirty_) {
+                strength_bits_ = passphrase_strength_bits(buf_);
+                strength_dirty_ = false;
+            }
+            double bits = strength_bits_;
             const char* label = bits < 40 ? "weak" : bits < 60 ? "fair" : bits < 80 ? "good" : "strong";
             uint16_t col = bits < 40 ? color::bad : bits < 60 ? color::warn : color::good;
             int sy = y0 + box_h + 4;
@@ -128,6 +134,7 @@ private:
         if (buf_.size() >= o_.max_len) return;
         buf_.insert(buf_.begin() + cur_, ch);
         cur_++;
+        strength_dirty_ = true;
     }
 
     void finish() {
@@ -162,6 +169,8 @@ private:
     bool reveal_ = false;
     int scroll_ = 0;
     bool blink_ = false;
+    bool strength_dirty_ = true;
+    double strength_bits_ = 0;
 };
 
 class MenuScreen : public Screen {
@@ -305,7 +314,7 @@ InputOpts existing_passphrase_opts(const char* hint) {
     InputOpts o;
     o.mask = true;
     o.min_len = 1;
-    o.max_len = 128;
+    o.max_len = kMaxPassphraseLen;
     o.hint = hint;
     return o;
 }
@@ -323,14 +332,22 @@ void ask_new_passphrase(const char* title, TextDone done) {
     InputOpts o;
     o.mask = true;
     o.strength = true;
-    o.min_len = 8;
-    o.max_len = 128;
-    o.hint = "Long & unique. 5+ random words is great.";
+    o.min_len = kMinPassphraseLen;
+    o.max_len = kMaxPassphraseLen;
+    o.hint = "Best: 6+ generated BIP39 words (Tools)";
     app().router.push(make_text_input(title, "", o, [title, done](SString& first) {
+        // Same policy the vault core enforces; catch it here so the user is
+        // asked again instead of failing after the confirm step.
+        VaultError policy = check_new_passphrase(first);
+        if (policy != VaultError::Ok) {
+            app().toast(vault_error_str(policy), color::warn);
+            ask_new_passphrase(title, done);
+            return;
+        }
         auto first_copy = std::make_shared<SecretBox>(first);
         InputOpts c;
         c.mask = true;
-        c.max_len = 128;
+        c.max_len = kMaxPassphraseLen;
         c.hint = "Type it again to confirm";
         app().router.push(make_text_input("Confirm passphrase", "", c,
                                           [title, done, first_copy](SString& second) {

@@ -72,15 +72,112 @@ SString pwgen_words(int count, char sep) {
     return out;
 }
 
+namespace {
+const char* const kKeyRows[] = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"};
+const char* const kWordSeps = " -_.,";
+
+char lower_ascii(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
+bool is_lower(char c) { return c >= 'a' && c <= 'z'; }
+bool is_upper(char c) { return c >= 'A' && c <= 'Z'; }
+bool is_sep(char c) { return c && strchr(kWordSeps, c); }
+
+// True if a and b (already lowercased) are neighbours on one keyboard row.
+bool keyboard_neighbours(char a, char b) {
+    if (!a || !b) return false;
+    for (const char* row : kKeyRows) {
+        const char* pa = strchr(row, a);
+        const char* pb = strchr(row, b);
+        if (pa && pb && (pa - pb == 1 || pb - pa == 1)) return true;
+    }
+    return false;
+}
+
+// Text made only of lowercase BIP39 words separated by spaces or hyphens (what
+// the generator produces): 11 bits per distinct word. Returns false for any
+// other shape. Works in fixed stack buffers that are wiped before returning,
+// so no copy of a word outlives the call.
+bool bip39_words_bits(const SString& pass, double& bits) {
+    constexpr size_t kMaxWord = 8;  // longest BIP39 word
+    constexpr size_t kMaxWords = 64;
+    char word[kMaxWord + 1] = {};
+    int seen[kMaxWords];
+    size_t wlen = 0, nseen = 0;
+    bool ok = true;
+    auto flush = [&]() {
+        if (!wlen) return;
+        word[wlen] = 0;
+        int idx = bip39_index(word);
+        wipe(word, sizeof word);
+        wlen = 0;
+        if (idx < 0) {
+            ok = false;
+            return;
+        }
+        for (size_t k = 0; k < nseen; k++)
+            if (seen[k] == idx) return;
+        if (nseen == kMaxWords) {
+            ok = false;
+            return;
+        }
+        seen[nseen++] = idx;
+    };
+    for (size_t i = 0; ok && i < pass.size(); i++) {
+        char c = pass[i];
+        if (is_lower(c)) {
+            if (wlen == kMaxWord)
+                ok = false;
+            else
+                word[wlen++] = c;
+        } else if (c == ' ' || c == '-') {
+            flush();
+        } else {
+            ok = false;
+        }
+    }
+    if (ok) flush();
+    ok = ok && nseen > 0;
+    if (ok) bits = 11.0 * double(nseen);
+    wipe(word, sizeof word);
+    wipe(seen, sizeof seen);
+    return ok;
+}
+
+// Lowercase words, optionally split by " -_.,", optionally a capital at the
+// start of a word, optionally a digit/symbol suffix of up to 6 ("Summer-time-2024!").
+// The most common human pattern, so it gets a hard cap.
+bool prose_like(const SString& pass) {
+    size_t end = pass.size();
+    size_t suffix = 0;
+    while (end > 0 && !is_lower(pass[end - 1]) && !is_upper(pass[end - 1]) && suffix < 6) {
+        end--;
+        suffix++;
+    }
+    bool letters = false;
+    for (size_t i = 0; i < end; i++) {
+        char c = pass[i];
+        if (is_lower(c)) {
+            letters = true;
+        } else if (is_upper(c)) {
+            if (i > 0 && !is_sep(pass[i - 1])) return false;
+            letters = true;
+        } else if (!is_sep(c)) {
+            return false;
+        }
+    }
+    return letters;
+}
+}  // namespace
+
 double passphrase_strength_bits(const SString& pass) {
     if (pass.empty()) return 0;
+    double words_bits;
+    if (bip39_words_bits(pass, words_bits)) return words_bits;
+
     bool lo = false, up = false, di = false, sy = false, sp = false;
-    int repeats = 0;
-    for (size_t i = 0; i < pass.size(); i++) {
-        char c = pass[i];
-        if (c >= 'a' && c <= 'z')
+    for (char c : pass) {
+        if (is_lower(c))
             lo = true;
-        else if (c >= 'A' && c <= 'Z')
+        else if (is_upper(c))
             up = true;
         else if (c >= '0' && c <= '9')
             di = true;
@@ -88,13 +185,31 @@ double passphrase_strength_bits(const SString& pass) {
             sp = true;
         else
             sy = true;
-        if (i > 0 && (pass[i] == pass[i - 1] || pass[i] == pass[i - 1] + 1)) repeats++;
     }
     int pool = (lo ? 26 : 0) + (up ? 26 : 0) + (di ? 10 : 0) + (sy ? 32 : 0) + (sp ? 1 : 0);
-    double effective_len = double(pass.size()) - repeats * 0.75;
-    if (effective_len < 1) effective_len = 1;
+
+    // Characters an attacker gets almost for free, ignoring case: repeats,
+    // runs (abc / cba), keyboard walks, and any 3-gram that appeared earlier.
+    const size_t n = pass.size();
+    SVec<char> cheap(n, 0);
+    for (size_t i = 1; i < n; i++) {
+        char a = lower_ascii(pass[i - 1]), b = lower_ascii(pass[i]);
+        if (b == a || b == a + 1 || b == a - 1 || keyboard_neighbours(a, b)) cheap[i] = 1;
+    }
+    for (size_t i = 2; i < n; i++) {
+        for (size_t j = 0; j + 3 <= i; j++) {
+            if (pass[j] == pass[i - 2] && pass[j + 1] == pass[i - 1] && pass[j + 2] == pass[i]) {
+                cheap[i - 2] = cheap[i - 1] = cheap[i] = 1;
+                break;
+            }
+        }
+    }
+    double effective_len = 0;
+    for (size_t i = 0; i < n; i++) effective_len += cheap[i] ? 0.1 : 1.0;
     // Human-chosen text carries far less entropy than random text; scale down.
-    return effective_len * std::log2(double(pool)) * 0.6;
+    double bits = effective_len * std::log2(double(pool)) * 0.6;
+    if (prose_like(pass) && bits > 50) bits = 50;
+    return bits;
 }
 
 }  // namespace cv
