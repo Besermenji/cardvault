@@ -136,6 +136,10 @@ void setup() {
 void loop() {
     M5Cardputer.update();
     App& a = app();
+    // After any navigation a key still held from the old screen must not repeat.
+    auto navigate = [&a] {
+        if (a.router.apply()) cancel_key_repeat();
+    };
     uint32_t now = millis();
 
 #ifdef CV_TEST_HOOKS
@@ -165,17 +169,17 @@ void loop() {
         }
 #endif
         if (Screen* s = a.router.top()) s->on_key(k);
-        a.router.apply();
+        navigate();
         if (a.lock_pending) a.lock_now();
-        a.router.apply();
+        navigate();
     }
 
     if (Screen* s = a.router.top()) s->tick(now);
-    a.router.apply();
+    navigate();
     if (a.lock_pending) a.lock_now();
-    a.router.apply();
+    navigate();
     handle_autolock(a, now);
-    a.router.apply();
+    navigate();
 
     bool toast_active = a.toast_active();
     Screen* s = a.router.top();

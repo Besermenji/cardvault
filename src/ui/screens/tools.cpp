@@ -419,6 +419,7 @@ void start_mnemonic_flow(const SString& current, TextDone done) {
     items.push_back({"Free text (non-BIP39)", [box, done] {
                          InputOpts o;
                          o.multiline = true;
+                         o.non_blank = true;
                          o.hint = "Any words/format. TAB when done.";
                          app().router.push(make_text_input("Seed words", box->value, o, done));
                      }});

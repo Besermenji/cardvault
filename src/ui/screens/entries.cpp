@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "core/entry_rules.h"
+#include "core/flows.h"
 #include "features/base32.h"
 #include "features/bip39.h"
 #include "features/totp.h"
@@ -295,9 +296,13 @@ private:
                              app().router.push(make_confirm(
                                  "Delete secret?", "This cannot be undone (unless you have a backup).",
                                  [id] {
-                                     app().session.data().remove(id);
-                                     if (app().save()) app().toast("Deleted", color::warn);
-                                     app().router.pop();  // leave the (now empty) entry view
+                                     // On a failed save the entry is restored and
+                                     // App::save has shown the error; stay on it.
+                                     if (delete_entry(app().session.data(), id,
+                                                      [] { return app().save(); })) {
+                                         app().toast("Deleted", color::warn);
+                                         app().router.pop();  // leave the (now empty) entry view
+                                     }
                                  },
                                  color::bad));
                          },
@@ -333,7 +338,10 @@ public:
                 draft_.set(kFieldTotpDigits, "6");
                 draft_.set(kFieldTotpPeriod, "30");
             }
-            if (prefill && type == EntryType::Password) draft_.set(kFieldPassword, *prefill);
+            if (prefill && type == EntryType::Password) {
+                draft_.set(kFieldPassword, *prefill);
+                dirty_ = true;  // generated, not stored yet: Esc must ask
+            }
         }
     }
     ~EntryEditScreen() override { draft_.clear(); }
@@ -413,6 +421,7 @@ private:
         InputOpts o;
         o.max_len = 60;
         app().router.push(make_text_input("Title", draft_.title, o, [this](SString& v) {
+            if (draft_.title == v) return;
             draft_.title = v;
             dirty_ = true;
         }));
@@ -429,7 +438,7 @@ private:
         }
         InputOpts o;
         o.multiline = field_is_multiline(f);
-        o.mask = f == kFieldPassword || f == kFieldBip39Pass;
+        o.mask = f == kFieldPassword || f == kFieldBip39Pass || f == kFieldTotpSecret;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
         app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
             set_field(f, v);
@@ -441,6 +450,9 @@ private:
     void set_field(uint8_t f, const SString& v) {
         const SString* old = draft_.get(f);
         if (!field_value_empty(f, v) || !old || field_value_empty(f, *old)) {
+            // Re-entering what is already stored is not a change.
+            bool same = old ? *old == v : v.empty();
+            if (same) return;
             draft_.set(f, v);
             dirty_ = true;
             return;

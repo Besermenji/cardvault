@@ -807,6 +807,131 @@ def t21_sd_compact_with_safety_copy(d):
     go_home(d)
 
 
+def t22_confirm_and_validation(d):
+    # Regression #38: Esc loses typed text, blank seeds, visible TOTP secret,
+    # spurious dirty flag, made-up clock default.
+    st = d.state()
+    if st["screen"] == "unlock":
+        d.unlock(P1)
+    go_home(d)
+    stored = len(d.dump())
+
+    # Esc in an edited text input asks; an untouched one closes at once.
+    new_entry(d, "Note")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.key("esc")
+    d.screen("entry_edit")  # nothing typed: no question
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("keep me")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("n")
+    st = d.screen("text_input", "Text")
+    check(info(st)["len"] == "7", f"declining must keep the text: {st}")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"discarded text must not dirty the draft: {st}")
+    check(len(d.dump()) == stored, "discarding must not save anything")
+
+    # Saving the same value is not a change.
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("x")
+    d.key("tab")
+    d.screen("entry_edit")
+    set_title(d, "Memo")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"fresh editor must be clean: {st}")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.key("tab")  # same text
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"re-saving the same text marked it dirty: {st}")
+    d.key("up")
+    d.key("enter")
+    d.screen("text_input", "Title")
+    d.key("enter")  # same title
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"re-entering the same title marked it dirty: {st}")
+    d.key("esc")
+    d.screen("entry_view")
+
+    # Free-text seed must contain a visible character.
+    new_entry(d, "Seed phrase")
+    d.key("down")
+    d.key("enter")
+    d.menu_pick("Free text (non-BIP39)")
+    d.screen("text_input", "Seed words")
+    d.type("   ")
+    d.key("tab")
+    d.toast("empty")
+    d.screen("text_input", "Seed words")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    d.screen("entry_edit")
+
+    # The TOTP secret is masked until OPT.
+    new_entry(d, "2FA (TOTP)")
+    d.key("down", 2)  # Secret
+    d.key("enter")
+    d.screen("text_input", "Secret (base32)")
+    d.type("JBSWY3DP")
+    st = d.state()
+    check(info(st)["reveal"] == "0", f"TOTP secret input must start masked: {st}")
+    d.key("opt")
+    st = d.state()
+    check(info(st)["reveal"] == "1", f"OPT should reveal the secret: {st}")
+    d.key("esc")  # masked prompt: closes at once, like the passphrase prompts
+    d.screen("entry_edit")
+    go_home(d)
+
+    # A generated password is unsaved: Esc must ask before dropping it.
+    d.key("tab")
+    d.menu_pick("Password generator")
+    d.screen("pwgen")
+    d.key("tab")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "1", f"generated password must start dirty: {st}")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    d.screen("home")
+
+    # Set clock: starts empty when unset, refuses old dates and trailing text.
+    d.cmd("settime 0")
+    d.key("tab")
+    d.menu_pick("2FA codes")
+    d.screen("totp_list")
+    d.key("t")
+    st = d.screen("text_input", "Set clock (UTC)")
+    check(info(st)["len"] == "0", f"clock input must not be pre-filled when unset: {st}")
+    d.type("2024-12-31 23:59")
+    d.key("enter")
+    d.toast("before 2025")
+    d.screen("text_input", "Set clock (UTC)")
+    d.type("2026-01-01 12:00xyz")
+    d.key("enter")
+    d.toast("Invalid")
+    st = d.screen("text_input", "Set clock (UTC)")
+    d.type("2026-01-01 12:00")
+    d.key("enter")
+    d.toast("Clock set")
+    d.screen("totp_list")
+    d.cmd(f"settime {int(time.time())}")
+    d.key("esc")
+    go_home(d)
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 

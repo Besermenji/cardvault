@@ -1,6 +1,7 @@
 // Single-line and multi-line text editor, optionally masked.
 #include <cmath>
 
+#include "core/entry_rules.h"
 #include "features/pwgen.h"
 #include "ui/app.h"
 
@@ -27,7 +28,15 @@ public:
     void on_key(const Key& k) override {
         invalidate();
         switch (k.code) {
-            case KeyCode::Esc: app().router.pop(); return;
+            case KeyCode::Esc:
+                // Masked prompts are passphrases: retyping costs nothing, and a
+                // confirm would just be another screen holding one.
+                if (edited_ && !o_.mask)
+                    app().router.push(make_confirm("Discard changes?", "What you typed is lost.",
+                                                   [] { app().router.pop(); }));
+                else
+                    app().router.pop();
+                return;
             case KeyCode::Opt:
                 if (o_.mask) reveal_ = !reveal_;
                 return;
@@ -45,6 +54,7 @@ public:
                     buf_.erase(cur_ - 1, 1);
                     cur_--;
                     strength_dirty_ = true;
+                    edited_ = true;
                 }
                 return;
             case KeyCode::Left:
@@ -135,6 +145,7 @@ private:
         buf_.insert(buf_.begin() + cur_, ch);
         cur_++;
         strength_dirty_ = true;
+        edited_ = true;
     }
 
     void finish() {
@@ -143,6 +154,11 @@ private:
             snprintf(msg, sizeof msg, "At least %u character%s", unsigned(o_.min_len),
                      o_.min_len == 1 ? "" : "s");
             app().toast(msg, color::warn);
+            return;
+        }
+        // Key 0 = no per-field rule: empty or whitespace-only.
+        if (o_.non_blank && field_value_empty(0, buf_)) {
+            app().toast("Can't be empty", color::warn);
             return;
         }
         TextDone done = done_;
@@ -170,6 +186,7 @@ private:
     int scroll_ = 0;
     bool blink_ = false;
     bool strength_dirty_ = true;
+    bool edited_ = false;
     double strength_bits_ = 0;
 };
 

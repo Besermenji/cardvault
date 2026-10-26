@@ -31,6 +31,9 @@ struct Key {
 
 // Returns true and fills `out` when a key event is available.
 bool poll_key(Key& out);
+// Stops the key currently held from auto-repeating. Called when the screen
+// changes, so a held key (e.g. Y on a confirm) can't fire again on the next one.
+void cancel_key_repeat();
 // True while the physical key that produces `c` is held down.
 bool key_held(char c);
 

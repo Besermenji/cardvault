@@ -63,6 +63,7 @@ App& app();
 struct InputOpts {
     bool mask = false;
     bool multiline = false;
+    bool non_blank = false;  // refuse an empty or whitespace-only value
     bool strength = false;   // show a passphrase strength meter
     size_t min_len = 0;
     size_t max_len = 4000;

@@ -102,6 +102,8 @@ bool poll_key(Key& out) {
     return true;
 }
 
+void cancel_key_repeat() { g_has_last = false; }
+
 #ifdef CV_TEST_HOOKS
 namespace {
 char g_held_override = 0;
