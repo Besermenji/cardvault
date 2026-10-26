@@ -56,7 +56,7 @@ KdfParams calibrate_kdf(uint32_t target_ms) {
     if (elapsed == 0) elapsed = 1;
     uint32_t passes = uint32_t(uint64_t(target_ms) * kMinKdfPasses / elapsed);
     if (passes < kMinKdfPasses) passes = kMinKdfPasses;
-    if (passes > kMaxKdfPasses) passes = kMaxKdfPasses;
+    if (passes > kdf_max_passes(mem)) passes = kdf_max_passes(mem);
     return KdfParams{mem, passes};
 }
 
