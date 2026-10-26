@@ -18,10 +18,6 @@ bool g_g0 = false;
 // Id of the request being answered ("-" when the line had none). Every reply
 // carries it, so the host can tell a late reply from the one it waits for.
 std::string g_id = "-";
-// `sync` is answered once the key queue is empty and the main loop has gone
-// round twice since, i.e. every earlier key was handled and navigated.
-std::string g_sync_id;
-int g_sync_wait = 0;
 
 std::string esc(const std::string& s) {
     std::string o;
@@ -155,9 +151,6 @@ void handle(ui::App& a, const std::string& request) {
     }
     if (cmd == "ping") {
         reply("pong");
-    } else if (cmd == "sync") {
-        g_sync_id = g_id;
-        g_sync_wait = 2;
     } else if (cmd == "state") {
         state(a);
     } else if (cmd == "dump") {
@@ -229,10 +222,6 @@ void begin() {
 }
 
 void poll(ui::App& a) {
-    if (g_sync_wait > 0 && ui::pending_keys() == 0 && --g_sync_wait == 0) {
-        g_id = g_sync_id;
-        reply("");
-    }
     while (Serial.available()) {
         char c = char(Serial.read());
         if (c == '\r') continue;

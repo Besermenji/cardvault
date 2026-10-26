@@ -43,8 +43,6 @@ class Skip(Exception):
 # "OK <id> <payload>" / "ERR <id> <message>"; id is "-" when the device could
 # not read one.
 REPLY = re.compile(r"^(OK|ERR) (\d+|-)(?: (.*))?$")
-# Safe to send twice if the link drops after the first write.
-IDEMPOTENT = ("ping", "state", "dump", "storage", "sync")
 
 
 class Device:
@@ -54,6 +52,7 @@ class Device:
         self.seq = 0  # last request id
         self.rx = b""  # bytes read but not yet split into lines
         self.stale = 0  # replies that arrived for an earlier request
+        self.unreadable = []  # requests the device could not parse ("ERR -")
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -66,7 +65,7 @@ class Device:
                 time.sleep(0.3)
                 self.ser.reset_input_buffer()
                 self.rx = b""
-                if self.cmd("ping", timeout=2, retry=False) == "pong":
+                if self.cmd("ping", timeout=2) == "pong":
                     return
             except (serial.SerialException, OSError, Fail):
                 pass
@@ -78,41 +77,43 @@ class Device:
             time.sleep(0.5)
         raise Fail(f"device on {self.port} not responding")
 
-    def cmd(self, line, timeout=10, retry=True):
+    def cmd(self, line, timeout=10):
         """Send `line` with a fresh request id and return the payload of the
         reply that carries the same id. Replies to earlier requests (late
-        answers after a timeout) are counted and skipped."""
+        answers after a timeout) are counted and skipped. A dropped link is
+        not retried: on native USB it means the device reset, and resending
+        would hide that."""
         self.seq += 1
         rid = str(self.seq)
-        try:
-            self.ser.write(f"{rid} {line}\n".encode())
-            end = time.time() + timeout
-            while time.time() < end:
-                self.rx += self.ser.read(256)
-                while b"\n" in self.rx:
-                    raw, self.rx = self.rx.split(b"\n", 1)
-                    m = REPLY.match(raw.decode(errors="replace").strip())
-                    if not m:
-                        continue  # boot output, CVTEST READY
-                    kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
-                    if got != rid and not (kind == "ERR" and got == "-"):
-                        self.stale += 1
-                        continue
-                    if kind == "ERR":
-                        raise Fail(f"{line!r}: {payload}")
-                    return payload
-        except (serial.SerialException, OSError):
-            if not retry or line.split(" ", 1)[0] not in IDEMPOTENT:
-                raise
-            self.connect()
-            return self.cmd(line, timeout, retry=False)
-        raise Fail(f"no reply to {line!r}")
+        self.ser.write(f"{rid} {line}\n".encode())
+        end = time.time() + timeout
+        while time.time() < end:
+            self.rx += self.ser.read(256)
+            while b"\n" in self.rx:
+                raw, self.rx = self.rx.split(b"\n", 1)
+                m = REPLY.match(raw.decode(errors="replace").strip())
+                if not m:
+                    continue  # boot output, CVTEST READY
+                kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
+                if got == "-":
+                    # Some line had no readable id: maybe ours, maybe an old
+                    # fragment. Not proof either way; keep waiting for ours.
+                    self.unreadable.append(payload)
+                    continue
+                if got != rid:
+                    self.stale += 1
+                    continue
+                if kind == "ERR":
+                    raise Fail(f"{line!r}: {payload}")
+                return payload
+        note = f" (device could not parse: {self.unreadable[-3:]})" if self.unreadable else ""
+        raise Fail(f"no reply to {line!r}{note}")
 
     def restart_cmd(self, line):
         """Send a command that reboots the device, then reconnect. The device
         answers before it restarts; an ERR (a failed factory reset) fails."""
         try:
-            self.cmd(line, timeout=30, retry=False)
+            self.cmd(line, timeout=30)
         except (serial.SerialException, OSError):
             pass  # the link went away with the reboot
         time.sleep(1.5)
@@ -148,20 +149,17 @@ class Device:
         """What is really stored: vault files, the raw partition, the NVS counter."""
         return json.loads(self.cmd("storage", timeout=30))
 
-    def sync(self):
-        """Returns once the device has handled every key sent so far."""
-        self.cmd("sync", timeout=60)
-
     def key(self, name, times=1):
-        # One key at a time: a key that changes the screen discards whatever
-        # is still queued behind it, so never leave two in the queue.
+        # The device handles each request in order and drains its key queue on
+        # every loop, so a reply-per-key keeps keys from piling up behind one
+        # that changes the screen (which discards the queue).
         for _ in range(times):
             self.cmd(f"key {name}")
-            self.sync()
+        time.sleep(0.05)
 
     def type(self, text):
         self.cmd(f"type {text}")
-        self.sync()
+        time.sleep(0.05)
 
     def wait(self, pred, what, timeout=20):
         end = time.time() + timeout
@@ -304,6 +302,28 @@ def backup_name_in(st):
 def need_card():
     if not SD_CARD:
         raise Skip("needs --sd and a FAT32 card in the device")
+
+
+def find_one(d, title):
+    """The single entry with this title (fails on none or several)."""
+    found = [e for e in d.dump() if e["title"] == title]
+    check(len(found) == 1, f"expected one entry titled {title!r}, found {len(found)}")
+    return found[0]
+
+
+def delete_entry(d, title):
+    go_home(d)
+    d.type(title)
+    d.wait(lambda s: info(s)["rows"] == "1", f"search finds {title}")
+    d.key("enter")
+    d.screen("entry_view")
+    d.key("tab")
+    d.menu_pick("Delete")
+    d.screen("confirm", "Delete secret?")
+    d.key("y")
+    d.screen("home")
+    d.key("esc")  # clear the search
+    d.screen("home")
 
 
 def set_title(d, title):
@@ -1201,6 +1221,8 @@ def t24_tab_cascade_and_clear_field(d):
     if d.state()["screen"] == "unlock":
         d.unlock(pw)
     go_home(d)
+    run = int(time.time()) % 100000  # unique titles, so reruns find only this run's
+    note_t, pw_t, totp_t = f"TabNote{run}", f"ClearMe{run}", f"Acme{run}"
 
     def storm(what, times=8):
         before = d.dump()
@@ -1246,7 +1268,7 @@ def t24_tab_cascade_and_clear_field(d):
 
     # A saved entry: its viewer and its action menu.
     new_entry(d, "Note")
-    set_title(d, "TabNote")
+    set_title(d, note_t)
     d.key("down")
     d.key("enter")
     d.screen("text_input", "Text")
@@ -1255,11 +1277,11 @@ def t24_tab_cascade_and_clear_field(d):
     save_entry(d)
     d.screen("entry_view")
     storm("the entry viewer")
-    check(any(e["title"] == "TabNote" for e in d.dump()), "the test note was not saved")
+    find_one(d, note_t)
 
     # Clearing a stored optional field: asks, and a yes sticks across a reboot.
     new_entry(d, "Password")
-    set_title(d, "ClearMe")
+    set_title(d, pw_t)
     d.key("down")
     d.key("enter")
     d.screen("text_input", "Username")
@@ -1290,7 +1312,7 @@ def t24_tab_cascade_and_clear_field(d):
     d.key("down")  # Issuer
     d.key("enter")
     d.screen("text_input", "Issuer")
-    d.type("Acme")
+    d.type(totp_t)  # the title defaults to the issuer
     d.key("enter")
     d.key("down")  # Secret
     d.key("enter")
@@ -1304,7 +1326,7 @@ def t24_tab_cascade_and_clear_field(d):
     d.key("down")  # Issuer
     d.key("enter")
     d.screen("text_input", "Issuer")
-    d.key("bs", 4)
+    d.key("bs", len(totp_t))
     d.key("enter")
     d.screen("confirm", "Clear Issuer?")
     d.key("y")
@@ -1312,12 +1334,10 @@ def t24_tab_cascade_and_clear_field(d):
     d.screen("entry_view")
 
     def cleared():
-        by_title = {e["title"]: e for e in d.dump()}
-        me = by_title.get("ClearMe")
-        acme = by_title.get("Acme")
-        check(me is not None and acme is not None, f"entries missing: {list(by_title)}")
+        me = find_one(d, pw_t)
         check(me["fields"].get("4", "") == "" and me["fields"]["5"] == "hunter22",
               f"username must be cleared, password kept: {me}")
+        acme = find_one(d, totp_t)
         check(acme["fields"].get("11", "") == "" and acme["fields"]["8"] == TOTP_SECRET,
               f"issuer must be cleared, secret kept: {acme}")
 
@@ -1325,6 +1345,12 @@ def t24_tab_cascade_and_clear_field(d):
     d.restart_cmd("reboot")
     d.unlock(pw)
     cleared()
+
+    # Leave the vault as this scenario found it.
+    for title in (note_t, pw_t, totp_t):
+        delete_entry(d, title)
+    check(not any(e["title"] in (note_t, pw_t, totp_t) for e in d.dump()),
+          "test entries left behind")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
@@ -1360,6 +1386,9 @@ def main():
                 print("stopping: later scenarios depend on earlier ones")
                 break
     print(f"\n{passed} passed, {failed} failed, {skipped} skipped")
+    if d.stale or d.unreadable:
+        print(f"transport: {d.stale} late replies skipped, "
+              f"{len(d.unreadable)} requests the device could not parse")
     sys.exit(1 if failed else 0)
 
 

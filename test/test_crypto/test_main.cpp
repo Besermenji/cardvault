@@ -44,10 +44,13 @@ struct Watch {
     bool active = false;
     size_t freed = 0;      // watched blocks that were freed
     size_t dirty = 0;      // ... of which still held non-zero bytes
-    void begin() { used = freed = dirty = 0; active = true; }
+    size_t overflow = 0;   // blocks not tracked because the table was full
+    void begin() { used = freed = dirty = overflow = 0; active = true; }
     void end() { active = false; used = 0; }
     void on_alloc(void* p, size_t n) {
-        if (active && used < kMax) blocks[used++] = {p, n};
+        if (!active) return;
+        if (used < kMax) blocks[used++] = {p, n};
+        else overflow++;
     }
     void on_free(void* p) {
         if (!p) return;
@@ -66,6 +69,13 @@ struct Watch {
     }
 };
 Watch g_watch;
+
+// Ends the watch; every block must have been tracked, or a dirty free of an
+// untracked one would go unseen.
+void watch_end() {
+    g_watch.end();
+    TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.overflow, "heap watcher table full: raise Watch::kMax");
+}
 }  // namespace
 
 void* operator new(size_t n) {
@@ -416,7 +426,7 @@ void test_heap_watch_detects_unwiped_free() {
         auto* plain = new std::string(200, 'x');  // heap buffer + the object
         delete plain;
     }
-    g_watch.end();
+    watch_end();
     TEST_ASSERT_TRUE(g_watch.freed >= 2);
     TEST_ASSERT_TRUE(g_watch.dirty >= 1);
 }
@@ -430,7 +440,7 @@ void test_sstring_heap_buffers_are_zero_when_freed() {
         wipe(s);                      // frees the last buffer
         s.assign(100, 'z');           // a fresh buffer, released by the destructor
     }
-    g_watch.end();
+    watch_end();
     TEST_ASSERT_TRUE_MESSAGE(g_watch.freed >= 3, "expected several buffers to be freed");
     TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.dirty, "a freed SString buffer still held secret bytes");
 }
@@ -448,7 +458,7 @@ void test_sbytes_and_svec_heap_buffers_are_zero_when_freed() {
         std::vector<SString, WipingAllocator<SString>> names(4, SString(64, 'n'));
         names.push_back(SString(64, 'm'));
     }
-    g_watch.end();
+    watch_end();
     TEST_ASSERT_TRUE(g_watch.freed >= 8);
     TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.dirty, "a freed buffer still held secret bytes");
 }
@@ -474,7 +484,7 @@ void test_secretbox_wipes_heap_value_on_destruction() {
         SecretBox box;
         box.value.assign(120, 'q');
     }
-    g_watch.end();
+    watch_end();
     TEST_ASSERT_TRUE(g_watch.freed >= 1);
     TEST_ASSERT_EQUAL(0, g_watch.dirty);
 }

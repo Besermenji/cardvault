@@ -81,14 +81,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the RFC 9106 vector and our wrapper against libargon2; freed `SString`/`SBytes`/`SVec` buffers
   and `SecretBox`/`SecretKey` are checked to be zero (a heap watcher sees each block as it is
   freed); every header field (version, KDF id, memory, passes, work cap) is tampered with and must
-  be refused before any key is derived and without costing an attempt. e2e: serial requests carry
-  ids, so a late reply can no longer be taken for the next answer, and `key`/`type` wait for a
-  `sync` barrier so a queued key is never dropped behind one that changes the screen; a `storage`
-  hook reads the real vault files, scans the raw partition for leftover vault bytes and reads the
-  attempt counter, so the wipe checks (factory, ten wrong passphrases, ERASE) prove the flash was
-  emptied; new scenarios for TAB on every screen, an empty backup passphrase, confirmed clearing of
-  a stored field and the Set clock default.
-
+  be refused without deriving a key and without costing an attempt. e2e: serial requests carry
+  ids, so a late reply can no longer be taken for the next answer, and a dropped link fails the run
+  instead of being retried silently; a `storage` hook reads the real vault files, scans the raw
+  partition for leftover vault bytes and reads the attempt counter, so the wipe checks (factory,
+  ten wrong passphrases, ERASE) prove the flash was emptied; new scenarios for TAB on every screen,
+  an empty backup passphrase, confirmed clearing of a stored field and the Set clock default.
 
 ## [0.1.0] - 2026-10-20
 

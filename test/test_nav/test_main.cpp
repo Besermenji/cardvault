@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/header_tamper.h"
 #include "core/flows.h"
 #include "core/messages.h"
 #include "crypto/kdf.h"
@@ -877,33 +878,11 @@ void test_unlock_unreadable_header_costs_nothing() {
 
 // Header fields that fail before any KDF runs cost no attempt, on unlock and
 // on restore, and are reported as damage rather than as a wrong passphrase.
-static void put_le32(std::vector<uint8_t>& b, size_t off, uint32_t v) {
-    for (int i = 0; i < 4; i++) b[off + i] = uint8_t(v >> (8 * i));
-}
-
 void test_header_field_errors_cost_no_attempt() {
-    struct Case {
-        const char* what;
-        std::function<void(std::vector<uint8_t>&)> tamper;
-        VaultError expect;
-    };
-    const Case cases[] = {
-        {"version", [](std::vector<uint8_t>& b) { b[4] ^= 1; }, VaultError::UnsupportedVersion},
-        {"kdf id", [](std::vector<uint8_t>& b) { b[5] ^= 1; }, VaultError::BadParams},
-        {"mem over cap", [](std::vector<uint8_t>& b) { put_le32(b, 8, kMaxKdfMemKib + 8); },
-         VaultError::BadParams},
-        {"passes over cap", [](std::vector<uint8_t>& b) { put_le32(b, 12, kMaxKdfPasses + 1); },
-         VaultError::BadParams},
-        {"work over cap",
-         [](std::vector<uint8_t>& b) {
-             put_le32(b, 8, kMaxKdfMemKib);
-             put_le32(b, 12, 25);
-         },
-         VaultError::BadParams},
-    };
-    for (const Case& c : cases) {
+    for (const test::HeaderTamper& c : test::header_tampers()) {
         Fixture f;
-        c.tamper(f.store.blob);
+        c.apply(f.store.blob);
+        uint32_t derives = kdf_derive_count();
         for (int i = 0; i < 12; i++) {  // more than kMaxAttempts: must never wipe
             UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
             TEST_ASSERT_EQUAL_MESSAGE(int(UnlockResult::Damaged), int(r.kind), c.what);
@@ -911,15 +890,18 @@ void test_header_field_errors_cost_no_attempt() {
             TEST_ASSERT_FALSE_MESSAGE(r.passphrase_ok, c.what);
             TEST_ASSERT_EQUAL_MESSAGE(0, f.guard.failures(), c.what);
         }
+        TEST_ASSERT_EQUAL_MESSAGE(derives, kdf_derive_count(), c.what);
 
-        auto backup = make_backup("backup pass", 1);
-        c.tamper(backup);
+        auto backup = make_backup("backup pass", 1);  // derives keys itself
+        c.apply(backup);
+        derives = kdf_derive_count();
         for (bool locked : {true, false}) {
             RestoreCheck rc = restore_check(f.guard, locked, backup, "backup pass");
             TEST_ASSERT_EQUAL_MESSAGE(int(RestoreCheck::Failed), int(rc.kind), c.what);
             TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(rc.error), c.what);
             TEST_ASSERT_EQUAL_MESSAGE(0, f.guard.failures(), c.what);
         }
+        TEST_ASSERT_EQUAL_MESSAGE(derives, kdf_derive_count(), c.what);
     }
 }
 

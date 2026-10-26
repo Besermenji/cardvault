@@ -29,5 +29,8 @@ uint32_t kdf_max_passes(uint32_t mem_kib);
 // Returns false if parameters are invalid or the work area cannot be allocated.
 bool kdf_derive(uint8_t out[32], const uint8_t* pass, size_t pass_len,
                 const uint8_t salt[kSaltSize], const KdfParams& p);
+// How many times kdf_derive ran Argon2. Lets tests prove a path never
+// derived a key (e.g. a tampered header is refused before any KDF work).
+uint32_t kdf_derive_count();
 
 }  // namespace cv

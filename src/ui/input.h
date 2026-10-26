@@ -5,7 +5,6 @@
 //   opt (alone)       -> Opt (toggle reveal in password fields)
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 namespace cv {
@@ -42,8 +41,6 @@ bool key_held(char c);
 #ifdef CV_TEST_HOOKS
 // Test builds only: queue a synthetic key event / simulate a held key.
 void inject_key(const Key& k);
-// Key events queued but not yet delivered to the UI.
-size_t pending_keys();
 void set_held_override(char c, bool held);
 // Simulates physically holding the key for `c` (0 = release): unlike
 // inject_key it goes through the press and auto-repeat path.
