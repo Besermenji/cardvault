@@ -134,7 +134,15 @@ CompactResult compact_vault(const VaultSession& session, BlobStore& store,
 // tries to save it again and returns false (do not lock) if that fails.
 bool persist_before_lock(VaultSession& session, BlobStore& store, bool& flash_missing);
 
-// ---- Delete -------------------------------------------------------------------
+// ---- Edit -------------------------------------------------------------------
+
+// Stores `entry` under `id` (replacing that entry), or as a new entry when `id`
+// is 0 or unknown, and calls `persist` (normally App::save). If persisting
+// fails, memory is put back exactly as it was: the old entry in its slot, or
+// the new one removed and the id counter restored. On success `id` is the
+// stored entry's id. Every temporary copy of an entry is wiped.
+bool put_entry(VaultData& data, const Entry& entry, uint32_t& id,
+               const std::function<bool()>& persist);
 
 // Removes the entry and calls `persist` (normally App::save). If persisting
 // fails the entry is put back at its old position, so memory never differs from

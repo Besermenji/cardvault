@@ -102,7 +102,10 @@ bool poll_key(Key& out) {
     return true;
 }
 
-void cancel_key_repeat() { g_has_last = false; }
+void drop_pending_keys() {
+    g_queue.clear();
+    g_has_last = false;
+}
 
 #ifdef CV_TEST_HOOKS
 namespace {

@@ -825,6 +825,12 @@ def t22_confirm_and_validation(d):
     d.screen("entry_edit")  # nothing typed: no question
     d.key("enter")
     d.screen("text_input", "Text")
+    d.type("ab")
+    d.key("bs", 2)
+    d.key("esc")
+    d.screen("entry_edit")  # typed and erased: same as the start, no question
+    d.key("enter")
+    d.screen("text_input", "Text")
     d.type("keep me")
     d.key("esc")
     d.screen("confirm", "Discard changes?")
@@ -891,9 +897,20 @@ def t22_confirm_and_validation(d):
     d.key("opt")
     st = d.state()
     check(info(st)["reveal"] == "1", f"OPT should reveal the secret: {st}")
-    d.key("esc")  # masked prompt: closes at once, like the passphrase prompts
-    d.screen("entry_edit")
-    go_home(d)
+    d.key("esc")  # a typed secret is worth a question, masked or not
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"discarded secret must not dirty the draft: {st}")
+    d.key("down")  # Digits: 6 -> 8 -> 6 is no change
+    d.key("enter")
+    st = d.state()
+    check(info(st)["dirty"] == "1", f"changing Digits should dirty the draft: {st}")
+    d.key("enter")
+    st = d.state()
+    check(info(st)["dirty"] == "0", f"Digits back to 6 must be clean again: {st}")
+    d.key("esc")
+    d.screen("home")
 
     # A generated password is unsaved: Esc must ask before dropping it.
     d.key("tab")
@@ -907,29 +924,35 @@ def t22_confirm_and_validation(d):
     d.key("y")
     d.screen("home")
 
-    # Set clock: starts empty when unset, refuses old dates and trailing text.
+    # Set clock: starts empty when unset, refuses old dates and trailing text,
+    # and a refused value comes back for fixing.
     d.cmd("settime 0")
-    d.key("tab")
-    d.menu_pick("2FA codes")
-    d.screen("totp_list")
-    d.key("t")
-    st = d.screen("text_input", "Set clock (UTC)")
-    check(info(st)["len"] == "0", f"clock input must not be pre-filled when unset: {st}")
-    d.type("2024-12-31 23:59")
-    d.key("enter")
-    d.toast("before 2025")
-    d.screen("text_input", "Set clock (UTC)")
-    d.type("2026-01-01 12:00xyz")
-    d.key("enter")
-    d.toast("Invalid")
-    st = d.screen("text_input", "Set clock (UTC)")
-    d.type("2026-01-01 12:00")
-    d.key("enter")
-    d.toast("Clock set")
-    d.screen("totp_list")
-    d.cmd(f"settime {int(time.time())}")
-    d.key("esc")
-    go_home(d)
+    try:
+        d.key("tab")
+        d.menu_pick("2FA codes")
+        d.screen("totp_list")
+        d.key("t")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "0", f"clock input must not be pre-filled when unset: {st}")
+        d.type("2024-12-31 23:59")
+        d.key("enter")
+        d.toast("before 2025")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "16", f"a refused date must come back for fixing: {st}")
+        d.key("bs", 16)
+        d.type("2026-01-01 12:00xyz")
+        d.key("enter")
+        d.toast("Invalid")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "19", f"refused text must come back for fixing: {st}")
+        d.key("bs", 3)
+        d.key("enter")
+        d.toast("Clock set")
+        d.screen("totp_list")
+        d.key("esc")
+        go_home(d)
+    finally:
+        d.cmd(f"settime {int(time.time())}")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]

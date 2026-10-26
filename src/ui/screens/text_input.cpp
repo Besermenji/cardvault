@@ -22,16 +22,18 @@ public:
     }
 #endif
     TextInputScreen(const char* title, const SString& initial, InputOpts o, TextDone done)
-        : title_(title), buf_(initial), cur_(initial.size()), o_(o), done_(std::move(done)) {}
-    ~TextInputScreen() override { wipe(buf_); }
+        : title_(title), buf_(initial), initial_(initial), cur_(initial.size()), o_(o),
+          done_(std::move(done)) {}
+    ~TextInputScreen() override {
+        wipe(buf_);
+        wipe(initial_);
+    }
 
     void on_key(const Key& k) override {
         invalidate();
         switch (k.code) {
             case KeyCode::Esc:
-                // Masked prompts are passphrases: retyping costs nothing, and a
-                // confirm would just be another screen holding one.
-                if (edited_ && !o_.mask)
+                if (o_.confirm_discard && buf_ != initial_)
                     app().router.push(make_confirm("Discard changes?", "What you typed is lost.",
                                                    [] { app().router.pop(); }));
                 else
@@ -54,7 +56,6 @@ public:
                     buf_.erase(cur_ - 1, 1);
                     cur_--;
                     strength_dirty_ = true;
-                    edited_ = true;
                 }
                 return;
             case KeyCode::Left:
@@ -145,7 +146,6 @@ private:
         buf_.insert(buf_.begin() + cur_, ch);
         cur_++;
         strength_dirty_ = true;
-        edited_ = true;
     }
 
     void finish() {
@@ -156,8 +156,7 @@ private:
             app().toast(msg, color::warn);
             return;
         }
-        // Key 0 = no per-field rule: empty or whitespace-only.
-        if (o_.non_blank && field_value_empty(0, buf_)) {
+        if (o_.non_blank && is_blank(buf_)) {
             app().toast("Can't be empty", color::warn);
             return;
         }
@@ -179,6 +178,7 @@ private:
 
     const char* title_;
     SString buf_;
+    SString initial_;  // Esc compares against it
     size_t cur_;
     InputOpts o_;
     TextDone done_;
@@ -186,7 +186,6 @@ private:
     int scroll_ = 0;
     bool blink_ = false;
     bool strength_dirty_ = true;
-    bool edited_ = false;
     double strength_bits_ = 0;
 };
 
@@ -330,6 +329,7 @@ ScreenPtr make_message(const char* title, const char* msg, uint16_t accent,
 InputOpts existing_passphrase_opts(const char* hint) {
     InputOpts o;
     o.mask = true;
+    o.confirm_discard = false;
     o.min_len = 1;
     o.max_len = kMaxPassphraseLen;
     o.hint = hint;
@@ -349,6 +349,7 @@ void ask_new_passphrase(const char* title, TextDone done) {
     InputOpts o;
     o.mask = true;
     o.strength = true;
+    o.confirm_discard = false;
     o.min_len = kMinPassphraseLen;
     o.max_len = kMaxPassphraseLen;
     o.hint = "Best: 6+ generated BIP39 words (Tools)";
@@ -364,6 +365,7 @@ void ask_new_passphrase(const char* title, TextDone done) {
         auto first_copy = std::make_shared<SecretBox>(first);
         InputOpts c;
         c.mask = true;
+        c.confirm_discard = false;
         c.max_len = kMaxPassphraseLen;
         c.hint = "Type it again to confirm";
         app().router.push(make_text_input("Confirm passphrase", "", c,

@@ -474,6 +474,45 @@ static Entry make_entry(const char* title, const char* secret) {
     return e;
 }
 
+void test_put_entry_adds_and_replaces() {
+    VaultData d;
+    uint32_t id = 0;
+    TEST_ASSERT_TRUE(put_entry(d, make_entry("a", "pw-a"), id, [] { return true; }));
+    TEST_ASSERT_EQUAL_UINT32(1, id);
+    Entry changed = make_entry("a2", "pw-a2");
+    TEST_ASSERT_TRUE(put_entry(d, changed, id, [] { return true; }));
+    TEST_ASSERT_EQUAL_UINT32(1, id);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
+    TEST_ASSERT_EQUAL_UINT32(1, d.entries[0].id);
+    TEST_ASSERT_EQUAL_STRING("pw-a2", d.entries[0].get_or(kFieldPassword).c_str());
+}
+
+void test_put_entry_rolls_back_when_save_fails() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    uint32_t next = d.next_id;
+    // New entry: removed again, id counter unchanged.
+    uint32_t id = 0;
+    TEST_ASSERT_FALSE(put_entry(d, make_entry("c", "pw-c"), id, [] { return false; }));
+    TEST_ASSERT_EQUAL_UINT32(0, id);
+    TEST_ASSERT_EQUAL(2, int(d.entries.size()));
+    TEST_ASSERT_EQUAL_UINT32(next, d.next_id);
+    // Existing entry: old version back in its slot.
+    id = b;
+    TEST_ASSERT_FALSE(put_entry(d, make_entry("b2", "pw-b2"), id, [] { return false; }));
+    TEST_ASSERT_EQUAL_UINT32(b, d.entries[1].id);
+    TEST_ASSERT_EQUAL_STRING("b", d.entries[1].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("pw-b", d.entries[1].get_or(kFieldPassword).c_str());
+    // While persisting, memory already holds the change.
+    bool seen = false;
+    TEST_ASSERT_TRUE(put_entry(d, make_entry("b3", "pw-b3"), id, [&] {
+        seen = d.find(b)->title == "b3";
+        return true;
+    }));
+    TEST_ASSERT_TRUE(seen);
+}
+
 void test_delete_entry_persists_and_removes() {
     VaultData d;
     uint32_t a = d.add(make_entry("a", "pw-a"));
@@ -929,6 +968,8 @@ int main() {
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
     RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
+    RUN_TEST(test_put_entry_adds_and_replaces);
+    RUN_TEST(test_put_entry_rolls_back_when_save_fails);
     RUN_TEST(test_delete_entry_persists_and_removes);
     RUN_TEST(test_delete_entry_rolls_back_when_save_fails);
     RUN_TEST(test_delete_entry_unknown_id_does_not_persist);

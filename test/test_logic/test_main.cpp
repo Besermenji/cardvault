@@ -246,6 +246,57 @@ void test_fit() {
 
 // ---- Entry rules ------------------------------------------------------------
 
+void test_is_blank() {
+    TEST_ASSERT_TRUE(is_blank(""));
+    TEST_ASSERT_TRUE(is_blank(" \t\n "));
+    TEST_ASSERT_FALSE(is_blank("  a "));
+}
+
+void test_entry_content_equal() {
+    Entry a;
+    a.type = EntryType::Password;
+    a.id = 1;
+    a.updated = 100;
+    a.title = "Bank";
+    a.set(kFieldUser, "alice");
+    a.set(kFieldPassword, "pw");
+    Entry b = a;
+    b.id = 2;
+    b.updated = 200;
+    TEST_ASSERT_TRUE(entry_content_equal(a, b));  // ids and times ignored
+    // Trimmed fields compare as saved; verbatim ones exactly.
+    b.title = " Bank ";
+    b.set(kFieldUser, "alice ");
+    TEST_ASSERT_TRUE(entry_content_equal(a, b));
+    b.set(kFieldPassword, "pw ");
+    TEST_ASSERT_FALSE(entry_content_equal(a, b));
+    b.set(kFieldPassword, "pw");
+    // A missing field equals an empty one, in both directions.
+    b.set(kFieldUrl, "  ");
+    TEST_ASSERT_TRUE(entry_content_equal(a, b));
+    TEST_ASSERT_TRUE(entry_content_equal(b, a));
+    b.set(kFieldUrl, "x");
+    TEST_ASSERT_FALSE(entry_content_equal(a, b));
+    TEST_ASSERT_FALSE(entry_content_equal(b, a));
+    b.set(kFieldUrl, "");
+    // A change and its undo cancel out.
+    b.set(kFieldUser, "bob");
+    TEST_ASSERT_FALSE(entry_content_equal(a, b));
+    b.set(kFieldUser, "alice");
+    TEST_ASSERT_TRUE(entry_content_equal(a, b));
+    b.title = "Banks";
+    TEST_ASSERT_FALSE(entry_content_equal(a, b));
+    b.title = "Bank";
+    b.type = EntryType::Note;
+    TEST_ASSERT_FALSE(entry_content_equal(a, b));
+    // Multi-line text is verbatim.
+    Entry n, m;
+    n.type = m.type = EntryType::Note;
+    n.set(kFieldBody, "  indented");
+    m.set(kFieldBody, "indented");
+    TEST_ASSERT_FALSE(entry_content_equal(n, m));
+}
+
 void test_finalize_default_titles() {
     Entry n;
     n.type = EntryType::Mnemonic;
@@ -498,5 +549,7 @@ int main() {
     RUN_TEST(test_finalize_normalises_totp_settings);
     RUN_TEST(test_finalize_keeps_multiline_text_and_space_passwords);
     RUN_TEST(test_field_value_empty_and_defining_field);
+    RUN_TEST(test_is_blank);
+    RUN_TEST(test_entry_content_equal);
     return UNITY_END();
 }

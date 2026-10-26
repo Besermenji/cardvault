@@ -136,9 +136,9 @@ void setup() {
 void loop() {
     M5Cardputer.update();
     App& a = app();
-    // After any navigation a key still held from the old screen must not repeat.
+    // Keys queued or held for the old screen must not reach the next one.
     auto navigate = [&a] {
-        if (a.router.apply()) cancel_key_repeat();
+        if (a.router.apply()) drop_pending_keys();
     };
     uint32_t now = millis();
 
