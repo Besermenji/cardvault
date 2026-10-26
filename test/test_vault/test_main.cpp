@@ -1,6 +1,7 @@
 #include <unity.h>
 
 #include <cstring>
+#include <functional>
 
 #include "crypto/rng.h"
 #include "vault/serializer.h"
@@ -101,6 +102,73 @@ void test_file_is_padded_and_has_no_plaintext() {
     std::string raw(store.blob.begin(), store.blob.end());
     TEST_ASSERT_EQUAL(std::string::npos, raw.find("SecretMarker"));
     TEST_ASSERT_EQUAL(std::string::npos, raw.find("TitleMarker"));
+}
+
+// Header bytes that are checked structurally (no passphrase, no KDF run).
+// Layout: 4 version, 5 kdf id, 6-7 reserved, 8-11 mem, 12-15 passes.
+static void put_le32(std::vector<uint8_t>& b, size_t off, uint32_t v) {
+    for (int i = 0; i < 4; i++) b[off + i] = uint8_t(v >> (8 * i));
+}
+
+void test_header_tamper_rejected_before_kdf() {
+    MemoryStore store;
+    VaultSession s;
+    s.create(store, "pw-test-pass", kFast);
+    s.close();
+    const std::vector<uint8_t> good = store.blob;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(good.data(), good.size())));
+
+    struct Case {
+        const char* what;
+        std::function<void(std::vector<uint8_t>&)> tamper;
+        VaultError expect;
+    };
+    const Case cases[] = {
+        {"version", [](std::vector<uint8_t>& b) { b[4] ^= 1; }, VaultError::UnsupportedVersion},
+        {"version 0", [](std::vector<uint8_t>& b) { b[4] = 0; }, VaultError::UnsupportedVersion},
+        {"kdf id", [](std::vector<uint8_t>& b) { b[5] ^= 1; }, VaultError::BadParams},
+        {"kdf id argon2d", [](std::vector<uint8_t>& b) { b[5] = 0; }, VaultError::BadParams},
+        {"mem over cap", [](std::vector<uint8_t>& b) { put_le32(b, 8, kMaxKdfMemKib + 8); },
+         VaultError::BadParams},
+        {"mem under min", [](std::vector<uint8_t>& b) { put_le32(b, 8, kMinKdfMemKib - 8); },
+         VaultError::BadParams},
+        {"mem not x8", [](std::vector<uint8_t>& b) { put_le32(b, 8, 4097); }, VaultError::BadParams},
+        {"mem huge", [](std::vector<uint8_t>& b) { put_le32(b, 8, 0xFFFFFFF8u); },
+         VaultError::BadParams},
+        {"passes over cap", [](std::vector<uint8_t>& b) { put_le32(b, 12, kMaxKdfPasses + 1); },
+         VaultError::BadParams},
+        {"passes under min", [](std::vector<uint8_t>& b) { put_le32(b, 12, kMinKdfPasses - 1); },
+         VaultError::BadParams},
+        {"passes huge", [](std::vector<uint8_t>& b) { put_le32(b, 12, 0xFFFFFFFFu); },
+         VaultError::BadParams},
+        {"work over cap",
+         [](std::vector<uint8_t>& b) {
+             put_le32(b, 8, kMaxKdfMemKib);
+             put_le32(b, 12, 25);
+         },
+         VaultError::BadParams},
+    };
+    for (const Case& c : cases) {
+        std::vector<uint8_t> bad = good;
+        c.tamper(bad);
+        TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(check_layout(bad.data(), bad.size())), c.what);
+        // Same answer through a session unlock: no key is derived, nothing opens.
+        store.blob = bad;
+        VaultSession t;
+        TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(t.unlock(store, "pw-test-pass")), c.what);
+        TEST_ASSERT_FALSE_MESSAGE(t.is_open(), c.what);
+    }
+
+    // The reserved bytes are not validated by the header parser. The key wrap
+    // re-encodes them as 0, so the passphrase still opens it, but the whole
+    // header is the body's associated data, so the body fails to open.
+    std::vector<uint8_t> bad = good;
+    bad[6] ^= 1;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(bad.data(), bad.size())));
+    store.blob = bad;
+    VaultSession t;
+    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(t.unlock(store, "pw-test-pass")));
+    TEST_ASSERT_FALSE(t.is_open());
 }
 
 void test_tamper_detection() {
@@ -462,6 +530,7 @@ int main() {
     RUN_TEST(test_create_unlock_round_trip);
     RUN_TEST(test_wrong_passphrase);
     RUN_TEST(test_file_is_padded_and_has_no_plaintext);
+    RUN_TEST(test_header_tamper_rejected_before_kdf);
     RUN_TEST(test_tamper_detection);
     RUN_TEST(test_change_passphrase);
     RUN_TEST(test_export_and_restore_backup);

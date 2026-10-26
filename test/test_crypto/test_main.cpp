@@ -77,6 +77,26 @@ void test_kdf_rejects_bad_params() {
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{65, 3}));
 }
 
+// Each per-field cap is tested where only that cap can reject (the work cap
+// and the multiple-of-8 rule stay out of the way).
+void test_kdf_field_cap_edges() {
+    // Memory: 4096 is the most allowed; 4104 is rejected by the cap alone.
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMaxKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMaxKdfMemKib + 8, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{0xFFFFFFF8u, kMinKdfPasses}));
+    // Memory must be a multiple of 8: 4097 and 4100 fail even though near the cap.
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMaxKdfMemKib + 1, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{4100, kMinKdfPasses}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib - 8, kMinKdfPasses}));
+    // Passes: 1000 at minimum memory is the most allowed (work 64000 < cap).
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMaxKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMaxKdfPasses + 1}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses - 1}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, 0}));
+}
+
 void test_kdf_work_cap_edges() {
     // Exactly at the cap is valid; one step over is not.
     TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{96, 1000}));
@@ -304,6 +324,7 @@ int main() {
     RUN_TEST(test_hmac_sha1_rfc2202);
     RUN_TEST(test_kdf_deterministic_and_salted);
     RUN_TEST(test_kdf_rejects_bad_params);
+    RUN_TEST(test_kdf_field_cap_edges);
     RUN_TEST(test_kdf_work_cap_edges);
     RUN_TEST(test_tune_hits_target_and_estimates_overhead);
     RUN_TEST(test_tune_ignores_cold_start);
