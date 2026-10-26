@@ -27,6 +27,9 @@ CardVault protects secrets stored on an M5Stack Cardputer ADV.
 - Malicious firmware flashed onto your device before you type your passphrase. This includes other
   firmware installed next to CardVault with Launcher: it can read the encrypted vault (enabling offline
   guessing) and reset the attempt counter stored in the shared NVS partition.
+- Old encrypted copies left in flash. Every save leaves the previous version behind until its
+  space is reused; after a passphrase change or restore, such a copy still opens with the old
+  passphrase. Settings › *Compact vault* erases them (it is offered after both).
 - Someone watching your screen or keyboard while you unlock or reveal secrets.
 - Losing the device without a backup. Always keep an independent backup of seed phrases.
 

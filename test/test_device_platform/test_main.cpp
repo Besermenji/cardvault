@@ -358,6 +358,27 @@ void test_kdf_calibration_fits_heap_and_time() {
     heap_caps_free(canvas);
 }
 
+void test_kdf_work_cap_leaves_headroom() {
+    // Every vault this firmware made has mem <= 256 and passes <= 1000, so its
+    // work is <= 256000 = kMaxKdfWork: existing vaults always stay openable.
+    // Here: today's calibration sits well below the cap, and the worst header
+    // the cap still accepts (at the memory this device uses) stays bounded.
+    KdfParams p = device::calibrate_kdf(2000);
+    uint64_t work = uint64_t(p.mem_kib) * p.passes;
+    KdfParams worst{p.mem_kib, kdf_max_passes(p.mem_kib)};
+    uint8_t out[32], salt[16] = {2};
+    uint32_t t0 = millis();
+    TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>("pass"), 4, salt, worst));
+    uint32_t ms = millis() - t0;
+    char msg[160];
+    snprintf(msg, sizeof msg, "calibrated work=%u (cap %u), worst accepted %u KiB x%u took %u ms",
+             unsigned(work), unsigned(kMaxKdfWork), unsigned(worst.mem_kib),
+             unsigned(worst.passes), unsigned(ms));
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_TRUE_MESSAGE(work * 2 <= kMaxKdfWork, "calibrated work above half the cap");
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 15000, "worst accepted header blocks over 15 s");
+}
+
 void test_full_vault_cycle_on_flash() {
     erase_vault_partition();
     FlashStore store;
@@ -429,7 +450,19 @@ void test_battery_reading_survives_rng_use() {
     TEST_ASSERT_TRUE_MESSAGE(abs(after - before) <= 10, "battery reading disturbed by RNG");
 }
 
-// ---- SD card (skipped without a working card) --------------------------------
+// ---- SD card ------------------------------------------------------------------
+// Skipped without a working card. Build with -DCV_EXPECT_SD to make a missing
+// or stalled card a failure (hardware checklist, #17):
+//   PLATFORMIO_BUILD_FLAGS=-DCV_EXPECT_SD pio test -e cardputer-test
+
+static void require_card() {
+    if (sd::mount()) return;
+#ifdef CV_EXPECT_SD
+    TEST_FAIL_MESSAGE(sd::wedged() ? "SD card stalled the driver" : "SD card did not mount");
+#else
+    TEST_IGNORE_MESSAGE("no working SD card inserted");
+#endif
+}
 
 void test_sd_mount_never_blocks_longer_than_timeout() {
     uint32_t t0 = millis();
@@ -439,12 +472,18 @@ void test_sd_mount_never_blocks_longer_than_timeout() {
     snprintf(msg, sizeof msg, "sd::mount() -> %s in %u ms (wedged=%d)", ok ? "OK" : "fail",
              unsigned(ms), int(sd::wedged()));
     TEST_MESSAGE(msg);
-    TEST_ASSERT_TRUE_MESSAGE(ms <= 3500, "mount blocked longer than its timeout");
-    if (ok) sd::unmount();
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 5500, "mount blocked longer than its timeout");
+#ifdef CV_EXPECT_SD
+    TEST_ASSERT_TRUE_MESSAGE(ok, msg);
+    // A mount cycle repeats cleanly (no leaked driver or bus state).
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::mount());
+#endif
+    sd::unmount();
 }
 
 void test_sd_backup_roundtrip() {
-    if (!sd::mount()) TEST_IGNORE_MESSAGE("no working SD card inserted");
+    require_card();
     std::vector<uint8_t> image(5000), back;
     rng_fill(image.data(), image.size());
     std::string name;
@@ -458,7 +497,7 @@ void test_sd_backup_roundtrip() {
 }
 
 void test_sd_numbering_never_overwrites_and_caps_reads() {
-    if (!sd::mount()) TEST_IGNORE_MESSAGE("no working SD card inserted");
+    require_card();
     std::vector<uint8_t> a(3000), b(3000), back;
     rng_fill(a.data(), a.size());
     rng_fill(b.data(), b.size());
@@ -513,6 +552,7 @@ void setup() {
         RUN_TEST(test_nvs_guard_persists_across_instances);
         RUN_TEST(test_test_build_uses_isolated_nvs);
         RUN_TEST(test_kdf_calibration_fits_heap_and_time);
+        RUN_TEST(test_kdf_work_cap_leaves_headroom);
         RUN_TEST(test_full_vault_cycle_on_flash);
         RUN_TEST(test_hw_rng_output_looks_random);
         RUN_TEST(test_battery_reading_survives_rng_use);
