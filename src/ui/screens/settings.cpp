@@ -24,6 +24,7 @@ void format_duration(uint32_t s, char* buf, size_t n) {
 void change_passphrase_flow() {
     InputOpts o;
     o.mask = true;
+    o.min_len = 1;
     o.hint = "First confirm your current passphrase";
     app().router.push(make_text_input("Current passphrase", "", o, [](SString& current) {
         App& a = app();
@@ -175,6 +176,7 @@ void restore_from(const std::string& name) {
     }
     InputOpts o;
     o.mask = true;
+    o.min_len = 1;
     o.hint = "Passphrase used when this backup was made";
     app().router.push(make_text_input("Backup passphrase", "", o, [image](SString& pass) {
         App& a = app();

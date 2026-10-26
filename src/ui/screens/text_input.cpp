@@ -133,7 +133,8 @@ private:
     void finish() {
         if (buf_.size() < o_.min_len) {
             char msg[40];
-            snprintf(msg, sizeof msg, "At least %u characters", unsigned(o_.min_len));
+            snprintf(msg, sizeof msg, "At least %u character%s", unsigned(o_.min_len),
+                     o_.min_len == 1 ? "" : "s");
             app().toast(msg, color::warn);
             return;
         }

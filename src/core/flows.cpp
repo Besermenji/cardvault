@@ -47,6 +47,12 @@ UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStor
 RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
                            const std::vector<uint8_t>& image, const SString& pass) {
     RestoreCheck r{RestoreCheck::Refused};
+    if (pass.empty()) {
+        // Not a guess: no KDF run, nothing counted.
+        r.kind = RestoreCheck::Failed;
+        r.error = VaultError::WrongPassphrase;
+        return r;
+    }
     if (device_locked && !guard.begin_attempt()) {
         r.kind = guard.exhausted() ? RestoreCheck::MustWipe : RestoreCheck::Refused;
         return r;

@@ -466,6 +466,9 @@ def t14_change_passphrase(d):
     d.key("down", 3)
     d.key("enter")
     d.screen("text_input", "Current passphrase")
+    d.key("enter")  # empty: refused before any KDF runs
+    d.toast("At least 1 character")
+    d.screen("text_input", "Current passphrase")
     d.type("not it at all")
     d.key("enter")
     d.toast("Wrong passphrase", timeout=30)

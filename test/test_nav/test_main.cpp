@@ -269,6 +269,18 @@ void test_restore_wrong_passphrase_counts_while_locked() {
     TEST_ASSERT_EQUAL(int(RestoreCheck::MustWipe), int(c.kind));
 }
 
+void test_restore_empty_passphrase_not_counted() {
+    Fixture f;
+    auto backup = make_backup("backup pass", 1);
+    for (int i = 0; i < 12; i++) {
+        RestoreCheck c = restore_check(f.guard, true, backup, "");
+        TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
+    }
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    RestoreCheck c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Ok), int(c.kind));
+}
+
 void test_restore_while_unlocked_does_not_count() {
     Fixture f;
     auto backup = make_backup("backup pass", 2);
@@ -374,6 +386,7 @@ int main() {
     RUN_TEST(test_unlock_failure_refunds_attempt);
     RUN_TEST(test_restore_declined_while_locked_does_not_reset_counter);
     RUN_TEST(test_restore_wrong_passphrase_counts_while_locked);
+    RUN_TEST(test_restore_empty_passphrase_not_counted);
     RUN_TEST(test_restore_while_unlocked_does_not_count);
     RUN_TEST(test_restore_corrupt_image_refunds);
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);

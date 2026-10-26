@@ -52,7 +52,8 @@ struct RestoreCheck {
 // Decrypts a backup image to verify the passphrase. While the device is
 // locked, attempts count against the guard like the unlock screen; a correct
 // backup passphrase only refunds its own attempt (it says nothing about the
-// device passphrase).
+// device passphrase). An empty passphrase is rejected without running the KDF
+// or counting an attempt.
 RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
                            const std::vector<uint8_t>& image, const SString& pass);
 
