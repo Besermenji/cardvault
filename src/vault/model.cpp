@@ -13,6 +13,37 @@ SString Entry::get_or(uint8_t key, const char* fallback) const {
     return v ? *v : SString(fallback);
 }
 
+Entry::Entry(Entry&& o) noexcept
+    : id(o.id), type(o.type), created(o.created), updated(o.updated),
+      title(std::move(o.title)), fields(std::move(o.fields)) {
+    o.clear();
+}
+
+Entry& Entry::operator=(const Entry& o) {
+    if (this == &o) return *this;
+    clear();
+    id = o.id;
+    type = o.type;
+    created = o.created;
+    updated = o.updated;
+    title = o.title;
+    fields = o.fields;
+    return *this;
+}
+
+Entry& Entry::operator=(Entry&& o) noexcept {
+    if (this == &o) return *this;
+    clear();
+    id = o.id;
+    type = o.type;
+    created = o.created;
+    updated = o.updated;
+    title = std::move(o.title);
+    fields = std::move(o.fields);
+    o.clear();
+    return *this;
+}
+
 const SString& Entry::value(uint8_t key) const {
     static const SString kEmpty;
     const SString* v = get(key);
@@ -55,11 +86,7 @@ bool VaultData::remove(uint32_t id) {
     for (auto it = entries.begin(); it != entries.end(); ++it) {
         if (it->id == id) {
             it->clear();
-            entries.erase(it);
-            // erase() moves the tail down; the vacated slot keeps the moved-from
-            // strings, whose inline buffers hold copies. Zero the spare capacity.
-            wipe(entries.data() + entries.size(),
-                 (entries.capacity() - entries.size()) * sizeof(Entry));
+            entries.erase(it);  // Entry's moves wipe every shifted source
             return true;
         }
     }

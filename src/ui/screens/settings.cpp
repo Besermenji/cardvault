@@ -226,8 +226,10 @@ private:
             i = constrain(i + d, 0, n - 1);
             a.settings.autolock_s = kAutolockChoices[i];
         } else if (sel_ == 1) {
-            a.settings.brightness = clamp_u32(uint32_t(int(a.settings.brightness) + d * 25),
-                                              kMinBrightness, kMaxBrightness);
+            // Signed sum: 20 - 25 must clamp to the minimum, not wrap around.
+            int v = int(a.settings.brightness) + d * 25;
+            a.settings.brightness =
+                uint32_t(constrain(v, int(kMinBrightness), int(kMaxBrightness)));
             a.apply_brightness();
         } else {
             return;

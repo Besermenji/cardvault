@@ -10,6 +10,7 @@
 #include "core/messages.h"
 #include "crypto/kdf.h"
 #include "ui/key_stream.h"
+#include "ui/peek.h"
 #include "vault/serializer.h"
 
 using namespace cv;
@@ -1024,6 +1025,34 @@ void test_autolock_step() {
     TEST_ASSERT_EQUAL(int(AutolockAction::Lock), int(autolock_step(true, false, 70000, limit, dim)));
 }
 
+void test_reveal_expiry_tolerates_clock_read_before_reveal() {
+    TEST_ASSERT_FALSE(reveal_expired(1000, 1005, 20000));  // `now` read just before
+    TEST_ASSERT_FALSE(reveal_expired(20999, 1000, 20000));
+    TEST_ASSERT_TRUE(reveal_expired(21000, 1000, 20000));
+    TEST_ASSERT_TRUE(reveal_expired(5000, 0xFFFFF000u, 2000));  // across millis() wrap
+}
+
+void test_hold_peek_limits_and_conceal() {
+    HoldPeek p;
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_TRUE(p.update(true, 100, 20000));  // pressed: shows
+    TEST_ASSERT_TRUE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 19000, 20000));
+    TEST_ASSERT_TRUE(p.update(true, 20100, 20000));  // held too long: hides
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 90000, 20000));  // stays hidden while held
+    TEST_ASSERT_FALSE(p.update(false, 90100, 20000));  // released
+    TEST_ASSERT_TRUE(p.update(true, 90200, 20000));  // a new press shows again
+    p.conceal();  // screen dims while held
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 90300, 20000));
+    p.update(false, 90400, 20000);
+    TEST_ASSERT_TRUE(p.update(true, 90500, 20000));
+    p.update(false, 90600, 20000);
+    p.conceal();  // concealing while not held blocks nothing later
+    TEST_ASSERT_TRUE(p.update(true, 90700, 20000));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_router_ops_are_deferred_until_apply);
@@ -1085,5 +1114,7 @@ int main() {
     RUN_TEST(test_persist_before_lock_is_a_no_op_normally);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
+    RUN_TEST(test_reveal_expiry_tolerates_clock_read_before_reveal);
+    RUN_TEST(test_hold_peek_limits_and_conceal);
     return UNITY_END();
 }

@@ -3,6 +3,8 @@
 
 #include <M5GFX.h>
 
+#include "ui/layout.h"
+
 namespace cv {
 namespace ui {
 
@@ -25,21 +27,11 @@ constexpr uint16_t info = rgb(88, 166, 255);
 constexpr uint16_t purple = rgb(188, 140, 255);
 }  // namespace color
 
-constexpr int kW = 240;
-constexpr int kH = 135;
-constexpr int kHeaderH = 18;
-constexpr int kFooterH = 11;
-constexpr int kBodyY = kHeaderH + 2;
-constexpr int kBodyH = kH - kHeaderH - kFooterH - 3;
-
-// Fonts
-#define CV_FONT_MONO (&fonts::AsciiFont8x16)  // 8x16, used for values/input
-#define CV_FONT_SMALL (&fonts::Font0)         // 6x8, hints and labels
+// Fonts (glyph sizes in ui/layout.h: keep them in sync)
+#define CV_FONT_MONO (&fonts::AsciiFont8x16)  // kMonoW x kMonoH, values/input
+#define CV_FONT_SMALL (&fonts::Font0)         // kSmallW x kSmallH, hints and labels
 #define CV_FONT_TITLE (&fonts::FreeSansBold9pt7b)
 #define CV_FONT_BIG (&fonts::Orbitron_Light_32)
-
-constexpr int kMonoW = 8;
-constexpr int kMonoH = 16;
 
 }  // namespace ui
 }  // namespace cv

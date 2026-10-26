@@ -72,6 +72,11 @@ size_t serialized_size(const VaultData& data) {
 
 VaultError serialize(const VaultData& data, SBytes& out) {
     wipe(out);
+    // The limit is judged by serialized_size(), so callers that report how
+    // full the vault is use exactly the rule that refuses it here.
+    size_t size = serialized_size(data);
+    if (size > kMaxPayload) return VaultError::TooLarge;
+    out.reserve(size);  // one allocation: no partial copies left by regrowth
     if (data.entries.size() > 0xffff) return VaultError::TooLarge;
     Writer w{out};
     w.u8(kPayloadVersion);

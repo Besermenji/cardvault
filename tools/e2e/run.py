@@ -1038,11 +1038,57 @@ def t23_secret_hygiene(d):
     d.key("down")  # the waking key press is swallowed
     d.wait(lambda s: not s["dimmed"], "key wakes the screen")
 
+    # Holding SPACE peeks for at most the reveal time, and dimming ends a
+    # peek until the key is released (a key stuck down in a pocket).
+    d.cmd("hold space 1")
+    try:
+        d.wait(lambda s: info(s)["held"] == "1", "peek while held")
+        d.wait(lambda s: info(s)["held"] == "0", "peek ends after the reveal time", timeout=10)
+        d.cmd("hold space 0")
+        d.wait(lambda s: info(s)["held"] == "0", "released")
+        d.cmd("hold space 1")
+        d.wait(lambda s: info(s)["held"] == "1", "a new press peeks again")
+        d.cmd("idle 111000")
+        st = d.wait(lambda s: s["dimmed"], "screen dims while held")
+        check(info(st)["held"] == "0", f"dim must end the peek: {st}")
+        d.key("down")  # wakes
+        st = d.wait(lambda s: not s["dimmed"], "wake")
+        check(info(st)["held"] == "0", f"peek stays off until the key is released: {st}")
+    finally:
+        d.cmd("hold space 0")
+
     # Delete the test entry again.
     d.key("tab")
     d.menu_pick("Delete")
     d.screen("confirm", "Delete secret?")
     d.key("y")
+    go_home(d)
+
+    # The generator hides its password when the screen dims.
+    d.key("tab")
+    d.menu_pick("Password generator")
+    st = d.screen("pwgen")
+    check(info(st)["hidden"] == "0", f"generator starts visible: {st}")
+    d.cmd("idle 111000")
+    st = d.wait(lambda s: s["dimmed"], "generator dims")
+    check(info(st)["hidden"] == "1", f"dim must hide the generated password: {st}")
+    d.key("down")  # swallowed: wakes
+    d.wait(lambda s: not s["dimmed"], "wake")
+    d.key("down")
+    d.wait(lambda s: info(s)["hidden"] == "0", "next key shows it again")
+    d.key("esc")
+    go_home(d)
+
+    # Brightness never wraps below its minimum to full brightness.
+    d.key("tab")
+    d.menu_pick("Settings")
+    d.screen("settings")
+    d.key("down")  # Brightness
+    d.key("left", 8)
+    st = d.state()
+    check(st["bright"] == 20, f"brightness must stop at 20: {st}")
+    d.key("right")
+    check(d.state()["bright"] == 45, "brightness steps up again")
     go_home(d)
 
     # Locked: a typed (and revealed) passphrase is dropped when idle.

@@ -13,8 +13,9 @@ namespace cv {
 
 constexpr uint8_t kPayloadVersion = 1;
 
-// Exact size serialize() produces, computed without building it (for showing
-// how full the vault is). entry_serialized_size is one entry's share.
+// Exact size serialize() produces, computed without building it. serialize()
+// refuses a vault above kMaxPayload by this measure; the UI uses it to show
+// how full the vault is. entry_serialized_size is one entry's share.
 size_t serialized_size(const VaultData& data);
 size_t entry_serialized_size(const Entry& e);
 

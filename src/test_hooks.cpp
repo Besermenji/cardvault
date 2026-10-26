@@ -77,6 +77,7 @@ void state(ui::App& a) {
     j += ",\"fails\":" + std::to_string(a.guard.failures());
     j += ",\"toast\":\"" + esc(a.toast_active() ? a.toast_msg.c_str() : "") + "\"";
     j += ",\"dimmed\":" + std::string(a.dimmed ? "true" : "false");
+    j += ",\"bright\":" + std::to_string(a.settings.brightness);
     j += ",\"time\":" + std::to_string(device::unix_time());
     j += ",\"info\":\"" + esc(info) + "\"}";
     reply(j);

@@ -18,7 +18,8 @@ public:
     const char* title() const override { return title_; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        out = "len=" + std::to_string(buf_.size()) + " reveal=" + std::to_string(reveal_);
+        out = "len=" + std::to_string(buf_.size()) + " reveal=" + std::to_string(reveal_) +
+              " hidden=" + std::to_string(hidden_);
     }
 #endif
     TextInputScreen(const char* title, const SString& initial, InputOpts o, TextDone done)
@@ -31,6 +32,7 @@ public:
 
     void on_key(const Key& k) override {
         invalidate();
+        hidden_ = false;
         switch (k.code) {
             case KeyCode::Esc:
                 if (o_.confirm_discard && buf_ != initial_)
@@ -94,7 +96,7 @@ public:
         for (int r = 0; r < rows && scroll_ + r < int(lines.size()); r++) {
             const Line& l = lines[scroll_ + r];
             int y = y0 + r * kMonoH;
-            if (o_.mask && !reveal_) {
+            if ((o_.mask && !reveal_) || hidden_) {
                 mask(c, 6, y, l.len, kCols);
             } else {
                 SString s(buf_.data() + l.start, l.len);
@@ -132,8 +134,11 @@ public:
                                           : "ENTER ok  fn+` cancel  fn+,/ move"));
     }
 
+    // The screen dims: mask the text (any input may hold a secret) until the
+    // next key, and drop an OPT reveal.
     void conceal() override {
         reveal_ = false;
+        hidden_ = true;
         invalidate();
     }
 
@@ -189,6 +194,7 @@ private:
     InputOpts o_;
     TextDone done_;
     bool reveal_ = false;
+    bool hidden_ = false;
     int scroll_ = 0;
     bool blink_ = false;
     bool strength_dirty_ = true;

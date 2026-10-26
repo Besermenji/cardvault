@@ -12,6 +12,7 @@
 #include "core/messages.h"
 #include "core/mnemonic_entry.h"
 #include "platform/device.h"
+#include "ui/layout.h"
 #include "ui/textwrap.h"
 
 using namespace cv;
@@ -523,7 +524,7 @@ void test_next_backup_number_skips_used_and_ignores_junk() {
 }
 
 void test_generator_output_fits_the_small_font_box() {
-    const int cols = (240 - 16) / 6;  // generator screen: 240 px wide, 6 px glyphs
+    const int cols = kPwgenColsSmall;
     // Longest password: 64 characters; longest words: 12 x 8 letters + 11 dashes.
     std::string pw(64, 'x'), words;
     for (int i = 0; i < 12; i++) words += (i ? "-" : "") + std::string(8, 'w');

@@ -28,11 +28,11 @@ void test_serializer_round_trip() {
     m.set(kFieldWords, "abandon abandon abandon abandon abandon abandon abandon abandon "
                        "abandon abandon abandon about");
     m.set(kFieldBip39Pass, "");
-    d.add(std::move(m));
+    d.add(m);
     Entry p = make_entry(EntryType::Password, "Email");
     p.set(kFieldUser, "me@example.com");
     p.set(kFieldPassword, "p@ss\nw0rd with \x01 bytes");
-    d.add(std::move(p));
+    d.add(p);
 
     SBytes bytes;
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(serialize(d, bytes)));
@@ -68,7 +68,7 @@ void test_create_unlock_round_trip() {
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.create(store, "hunter2 hunter2", kFast)));
     Entry n = make_entry(EntryType::Note, "Hello");
     n.set(kFieldBody, "World");
-    s.data().add(std::move(n));
+    s.data().add(n);
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.save(store)));
     s.close();
     TEST_ASSERT_FALSE(s.is_open());
@@ -94,7 +94,7 @@ void test_file_is_padded_and_has_no_plaintext() {
     s.create(store, "pw-test-pass", kFast);
     Entry n = make_entry(EntryType::Note, "TitleMarker");
     n.set(kFieldBody, "SecretMarker");
-    s.data().add(std::move(n));
+    s.data().add(n);
     s.save(store);
     size_t body = store.blob.size() - kHeaderSize - kNonceSize - kMacSize;
     TEST_ASSERT_EQUAL(0, body % kPadBlock);
@@ -252,7 +252,7 @@ void test_too_large_rejected() {
     for (int i = 0; i < 4; i++) {
         Entry n = make_entry(EntryType::Note, "big");
         n.set(kFieldBody, SString(15000, 'a'));
-        s.data().add(std::move(n));
+        s.data().add(n);
     }
     TEST_ASSERT_EQUAL(int(VaultError::TooLarge), int(s.save(store)));
 }
@@ -373,19 +373,55 @@ void test_vault_add_copies_and_keeps_source() {
     TEST_ASSERT_EQUAL(0, n.id);
 }
 
-void test_remove_wipes_spare_capacity_of_entries() {
+// True when no byte of the string's buffer (live part or not) is set.
+static bool buffer_zero(const SString& str) {
+    const char* p = str.data();
+    for (size_t i = 0; i < str.capacity(); i++)
+        if (p[i]) return false;
+    return true;
+}
+
+void test_entry_move_wipes_source() {
+    Entry a = make_entry(EntryType::Password, "short-title");  // inline buffer
+    a.set(kFieldPassword, "pw");
+    Entry b(std::move(a));
+    TEST_ASSERT_EQUAL_STRING("short-title", b.title.c_str());
+    TEST_ASSERT_EQUAL_STRING("pw", b.value(kFieldPassword).c_str());
+    TEST_ASSERT_TRUE(a.title.empty() && a.fields.empty());
+    TEST_ASSERT_TRUE(buffer_zero(a.title));
+
+    Entry c = make_entry(EntryType::Note, "older-longer-title");
+    c = std::move(b);
+    TEST_ASSERT_EQUAL_STRING("short-title", c.title.c_str());
+    TEST_ASSERT_TRUE(b.title.empty() && b.fields.empty());
+    TEST_ASSERT_TRUE(buffer_zero(b.title));
+}
+
+void test_entry_copy_assign_leaves_no_old_bytes() {
+    Entry dst = make_entry(EntryType::Note, "old-secret-ttl");  // 14 chars, inline
+    Entry src = make_entry(EntryType::Note, "ab");
+    dst = src;
+    TEST_ASSERT_EQUAL_STRING("ab", dst.title.c_str());
+    const char* p = dst.title.data();
+    for (size_t i = dst.title.size(); i < dst.title.capacity(); i++)
+        TEST_ASSERT_EQUAL_UINT8(0, uint8_t(p[i]));
+}
+
+void test_remove_shifts_entries_without_leftover_copies() {
     VaultData d;
-    for (int i = 0; i < 3; i++) {
-        Entry n = make_entry(EntryType::Note, "tail-secret");
-        d.add(n);
-    }
-    const Entry* base = d.entries.data();
-    size_t cap = d.entries.capacity();
+    const char* titles[] = {"gone-secret", "keep-one", "keep-two"};
+    for (const char* t : titles) d.add(make_entry(EntryType::Note, t));
     d.remove(d.entries[0].id);
-    TEST_ASSERT_EQUAL_PTR(base, d.entries.data());  // no reallocation
-    const uint8_t* raw = reinterpret_cast<const uint8_t*>(base + d.entries.size());
-    size_t n = (cap - d.entries.size()) * sizeof(Entry);
-    for (size_t i = 0; i < n; i++) TEST_ASSERT_EQUAL_UINT8(0, raw[i]);
+    TEST_ASSERT_EQUAL(2, d.entries.size());
+    TEST_ASSERT_EQUAL_STRING("keep-one", d.entries[0].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("keep-two", d.entries[1].title.c_str());
+    // Shifted slots were wiped before being refilled: nothing of a longer
+    // previous title survives past the end of a shorter new one.
+    for (auto& e : d.entries) {
+        const char* p = e.title.data();
+        for (size_t i = e.title.size(); i < e.title.capacity(); i++)
+            TEST_ASSERT_EQUAL_UINT8(0, uint8_t(p[i]));
+    }
 }
 
 void test_kdf_check_retunes_before_writing() {
@@ -441,6 +477,8 @@ int main() {
     RUN_TEST(test_entry_value_returns_reference_or_empty);
     RUN_TEST(test_serialized_size_matches_serialize);
     RUN_TEST(test_vault_add_copies_and_keeps_source);
-    RUN_TEST(test_remove_wipes_spare_capacity_of_entries);
+    RUN_TEST(test_entry_move_wipes_source);
+    RUN_TEST(test_entry_copy_assign_leaves_no_old_bytes);
+    RUN_TEST(test_remove_shifts_entries_without_leftover_copies);
     return UNITY_END();
 }
