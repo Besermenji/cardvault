@@ -30,10 +30,13 @@ void radios_off();
 Settings load_settings();
 void save_settings(const Settings& s);
 
-// Picks Argon2 memory from the free heap and times the device to choose passes
-// for ~target_ms unlock time. Steps the memory down if the work area cannot be
-// allocated. status == Failed means no usable parameters.
-KdfTuning calibrate_kdf(uint32_t target_ms);
+// Times one kdf_derive with these parameters (µs, 0 if it could not run).
+uint32_t time_kdf(const KdfParams& p);
+// Picks Argon2 memory from the free heap (at least min_mem_kib) and times the
+// device to choose passes for ~target_ms unlock time. Steps the memory down,
+// not below min_mem_kib, if the work area cannot be allocated.
+// status == Failed means no usable parameters.
+KdfTuning calibrate_kdf(uint32_t target_ms, uint32_t min_mem_kib = 0);
 
 bool time_valid();
 uint32_t unix_time();  // 0 if the clock was never set

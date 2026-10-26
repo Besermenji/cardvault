@@ -19,6 +19,37 @@ void draw_lock_icon(Canvas& c, int cx, int cy, uint16_t col) {
     c.fillRect(cx - 1, cy + 5, 2, 5, color::bg);
 }
 
+}  // namespace
+
+bool tune_security(KdfTuning& out, uint32_t min_mem_kib) {
+    App& a = app();
+    a.busy(msg::kTuning);
+    out = device::calibrate_kdf(kKdfTargetMs, min_mem_kib);
+    if (out.status == KdfTuneStatus::Failed) {
+        a.router.push(make_message(msg::kTuneFailedTitle, msg::kTuneFailed, color::bad));
+        return false;
+    }
+    return true;
+}
+
+KdfCheck kdf_closed_loop(KdfTuning& t) {
+    return [&t](uint32_t derive_us, KdfParams& kdf) {
+        if (!kdf_check(t, derive_us, kKdfTargetMs, device::time_kdf)) return false;
+        kdf = t.params;
+        return true;
+    };
+}
+
+void show_tune_warning(const KdfTuning& t) {
+    if (t.status == KdfTuneStatus::Ok) return;
+    uint32_t ms = kdf_estimate_ms(t);
+    char text[160];
+    snprintf(text, sizeof text, msg::kTuneMissed, unsigned(ms / 1000), unsigned(ms % 1000 / 100));
+    app().router.push(make_message(msg::kTuneMissedTitle, text, color::warn));
+}
+
+namespace {
+
 void create_vault(SString& pass) {
     App& a = app();
     // Clear any stale count first, so a new vault never starts with failures.
@@ -27,20 +58,17 @@ void create_vault(SString& pass) {
                                    color::bad));
         return;
     }
-    KdfParams kdf;
-    char note[48];
-    if (!tune_security(kdf, note)) return;
+    KdfTuning tuning;
+    if (!tune_security(tuning)) return;
     a.busy("Creating vault...");
-    VaultError e = a.session.create(a.store, pass, kdf);
+    VaultError e = a.session.create(a.store, pass, tuning.params, kdf_closed_loop(tuning));
     if (e != VaultError::Ok) {
         a.router.push(make_message("Setup failed", vault_error_str(e), color::bad));
         return;
     }
     a.router.reset(make_home());
-    if (note[0])
-        a.toast(note, color::warn, 3500);
-    else
-        a.toast("Vault created. TAB opens the menu.", color::good, 3000);
+    show_tune_warning(tuning);
+    a.toast("Vault created. TAB opens the menu.", color::good, 3000);
 }
 
 class SetupScreen : public Screen {

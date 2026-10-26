@@ -414,7 +414,7 @@ void test_dialog_messages_fit_the_screen() {
                           msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged,
                           msg::kCompactConfirm, msg::kCompactDone, msg::kCompactFailed,
                           msg::kCompactAfterPass, msg::kSdStalled,
-                          msg::kCompactNeedsSd, msg::kCompactAfterRestore}) {
+                          msg::kCompactNeedsSd, msg::kCompactAfterRestore, msg::kTuneFailed}) {
         TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
                                      msg::kDialogMaxLines,
                                  m);
@@ -425,6 +425,11 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kCompactTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kSdStalledTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterRestoreTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kTuneFailedTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kTuneMissedTitle) <= 20);
+    char missed[160];
+    snprintf(missed, sizeof missed, msg::kTuneMissed, 99u, 9u);
+    TEST_ASSERT_TRUE(int(wrap(missed, strlen(missed), msg::kDialogCols).size()) <= msg::kDialogMaxLines);
     // The longest backup name the numbering produces still fits.
     char done[160];
     snprintf(done, sizeof done, msg::kCompactDoneWithCopy, "backup-99999999.cvb");

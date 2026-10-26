@@ -118,15 +118,17 @@ void change_passphrase_flow() {
         ask_new_passphrase("New passphrase", [](SString& next) {
             App& a = app();
             // Re-tune: vaults from older builds get the full unlock cost too.
-            KdfParams kdf;
-            char note[48];
-            if (!tune_security(kdf, note)) return;
+            // Never with less memory than the vault already has: the unlocked
+            // vault takes heap, which would otherwise shrink the new size.
+            KdfTuning tuning;
+            if (!tune_security(tuning, a.session.header().kdf.mem_kib)) return;
             a.busy("Re-encrypting...");
-            VaultError e = a.session.change_passphrase(a.store, next, kdf);
+            VaultError e =
+                a.session.change_passphrase(a.store, next, tuning.params, kdf_closed_loop(tuning));
             if (e == VaultError::Ok) {
-                if (note[0]) a.toast(note, color::warn, 3500);
                 a.router.push(make_confirm(msg::kCompactAfterPassTitle, msg::kCompactAfterPass,
                                            [] { run_compact(true); }, color::good));
+                show_tune_warning(tuning);  // on top, read first
             } else {
                 a.toast(vault_error_str(e), color::bad, 3000);
             }

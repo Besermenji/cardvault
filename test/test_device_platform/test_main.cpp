@@ -354,9 +354,6 @@ void test_kdf_calibration_fits_heap_and_time() {
              unsigned(t.probe_a_us), unsigned(t.probe_b_passes), unsigned(t.probe_b_us),
              unsigned(t.per_pass_us), unsigned(t.overhead_us));
     TEST_MESSAGE(msg);
-    snprintf(msg, sizeof msg, "check=%u us retuned=%d status=%d", unsigned(t.check_us),
-             int(t.retuned), int(t.status));
-    TEST_MESSAGE(msg);
     TEST_ASSERT_EQUAL_MESSAGE(int(KdfTuneStatus::Ok), int(t.status), "calibration clamped or failed");
     TEST_ASSERT_TRUE(kdf_params_valid(p));
     TEST_ASSERT_TRUE_MESSAGE(p.mem_kib >= 128, "Argon2 memory below 128 KiB");
@@ -365,9 +362,14 @@ void test_kdf_calibration_fits_heap_and_time() {
     uint32_t t0 = millis();
     TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>("pass"), 4, salt, p));
     uint32_t ms = millis() - t0;
-    snprintf(msg, sizeof msg, "unlock KDF took %u ms", unsigned(ms));
+    // The fit alone should already be on target, so the closed loop that
+    // follows the real derive has nothing to do.
+    bool retuned = kdf_check(t, ms * 1000, kKdfTargetMs, device::time_kdf);
+    snprintf(msg, sizeof msg, "unlock KDF took %u ms (fit predicted %u ms), closed loop retuned=%d",
+             unsigned(ms), unsigned(kdf_estimate_ms(t)), int(retuned));
     TEST_MESSAGE(msg);
     TEST_ASSERT_TRUE_MESSAGE(ms >= 1500 && ms <= 2500, "unlock time outside 2 s +-25%");
+    TEST_ASSERT_FALSE_MESSAGE(retuned, "closed loop had to correct the fit");
     heap_caps_free(canvas);
 }
 

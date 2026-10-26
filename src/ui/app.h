@@ -107,10 +107,14 @@ void ask_new_passphrase(const char* title, TextDone done);
 InputOpts existing_passphrase_opts(const char* hint);
 // True (after showing a toast) while the attempt guard's delay is running.
 bool attempt_delay_active();
-// Times this device and picks the Argon2 parameters for a ~2 s unlock. On
-// failure shows a message and returns false. If the target could not be met,
-// note holds a short warning to show instead of the success toast.
-bool tune_security(KdfParams& out, char (&note)[48]);
+// Times this device and picks the Argon2 parameters for a ~2 s unlock, with at
+// least min_mem_kib memory. On failure shows a message and returns false.
+bool tune_security(KdfTuning& out, uint32_t min_mem_kib = 0);
+// Closed loop for VaultSession::create / change_passphrase: rescales `t` once
+// if the real derive misses the target.
+KdfCheck kdf_closed_loop(KdfTuning& t);
+// If the tuning could not meet the target, says how long an unlock takes.
+void show_tune_warning(const KdfTuning& t);
 // Opens the clock-setting input; calls done after a valid time was set.
 void ask_set_time(std::function<void()> done = nullptr);
 // Picks a backup on the SD card and restores it (works while locked).

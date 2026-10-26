@@ -101,79 +101,81 @@ void test_kdf_work_cap_edges() {
 
 namespace {
 struct Model {
-    double overhead_us = 20000;         // malloc + wipe, independent of passes
-    double us_per_kib_pass = 95;        // Cardputer ADV measured ~0.095 ms
-    double cold_extra_us = 0;           // added to the first call only
-    double check_slowdown = 1.0;        // applied from the 4th call on (the closed-loop check)
+    double overhead_us = 20000;   // malloc + wipe, independent of passes
+    double us_per_kib_pass = 95;  // Cardputer ADV measured ~0.095 ms
+    double cold_extra_us = 0;     // added to the first call only
     int calls = 0;
+    double total_us = 0;          // time spent in all calls
     uint32_t operator()(const KdfParams& p) {
         calls++;
         double t = overhead_us + double(p.passes) * p.mem_kib * us_per_kib_pass;
         if (calls == 1) t += cold_extra_us;
-        if (calls >= 4) t *= check_slowdown;
+        total_us += t;
         return uint32_t(t);
     }
+    KdfTimer timer() {
+        return [this](const KdfParams& p) { return (*this)(p); };
+    }
+    double ms(const KdfParams& p) const {
+        return (overhead_us + double(p.passes) * p.mem_kib * us_per_kib_pass) / 1000.0;
+    }
 };
-KdfTuning tune(Model& m, uint32_t mem = 128, uint32_t target_ms = 2000) {
-    return kdf_tune(mem, target_ms, [&m](const KdfParams& p) { return m(p); });
-}
-double model_ms(const Model& m, const KdfParams& p) {
-    return (m.overhead_us + double(p.passes) * p.mem_kib * m.us_per_kib_pass) / 1000.0;
-}
 }  // namespace
 
 void test_tune_hits_target_and_estimates_overhead() {
     Model m;
     m.overhead_us = 150000;  // large fixed cost the old extrapolation counted as per-pass
-    KdfTuning t = tune(m);
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
     TEST_ASSERT_EQUAL(int(KdfTuneStatus::Ok), int(t.status));
-    TEST_ASSERT_FALSE(t.retuned);
-    TEST_ASSERT_EQUAL(4, m.calls);  // warm-up, A, B, check
+    TEST_ASSERT_EQUAL(3, m.calls);  // warm-up, A, B: no extra derive at the target
+    TEST_ASSERT_TRUE(m.total_us < 1000000);
     TEST_ASSERT_TRUE(kdf_params_valid(t.params));
-    TEST_ASSERT_FLOAT_WITHIN(60.0, 2000.0, model_ms(m, t.params));
+    TEST_ASSERT_FLOAT_WITHIN(60.0, 2000.0, m.ms(t.params));
     TEST_ASSERT_UINT32_WITHIN(5000, 150000, t.overhead_us);
     TEST_ASSERT_UINT32_WITHIN(200, 128 * 95, t.per_pass_us);
+    TEST_ASSERT_UINT32_WITHIN(60, 2000, kdf_estimate_ms(t));
 }
 
 void test_tune_ignores_cold_start() {
     Model m;
     m.cold_extra_us = 900000;  // first derive is far slower than the rest
-    KdfTuning t = tune(m);
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
     TEST_ASSERT_EQUAL(int(KdfTuneStatus::Ok), int(t.status));
-    TEST_ASSERT_FALSE(t.retuned);
-    TEST_ASSERT_FLOAT_WITHIN(60.0, 2000.0, model_ms(m, t.params));
-}
-
-void test_tune_retunes_once_when_check_is_off() {
-    Model m;
-    m.check_slowdown = 2.0;  // the real derive turns out twice as slow as the probes
-    KdfTuning t = tune(m);
-    TEST_ASSERT_TRUE(t.retuned);
-    TEST_ASSERT_EQUAL(4, m.calls);  // one retune, not re-checked
-    m.check_slowdown = 1.0;
-    double ms = model_ms(m, t.params) * 2.0;  // what the slow device really takes
-    TEST_ASSERT_FLOAT_WITHIN(250.0, 2000.0, ms);
-    TEST_ASSERT_TRUE(t.params.passes < 100);
+    TEST_ASSERT_FLOAT_WITHIN(60.0, 2000.0, m.ms(t.params));
 }
 
 void test_tune_reports_slow_and_fast_clamps() {
     Model slow;
     slow.us_per_kib_pass = 20000;  // 128 KiB x 3 passes already takes ~7.7 s
-    KdfTuning s = tune(slow);
+    KdfTuning s = kdf_tune(128, 2000, slow.timer());
     TEST_ASSERT_EQUAL(int(KdfTuneStatus::RaisedToMin), int(s.status));
     TEST_ASSERT_EQUAL(kMinKdfPasses, s.params.passes);
+    TEST_ASSERT_EQUAL(2, slow.calls);  // no second probe
+    TEST_ASSERT_UINT32_WITHIN(100, 7700, kdf_estimate_ms(s));
 
     Model fast;
     fast.us_per_kib_pass = 0.05;
     fast.overhead_us = 100;
-    KdfTuning f = tune(fast);
+    KdfTuning f = kdf_tune(128, 2000, fast.timer());
     TEST_ASSERT_EQUAL(int(KdfTuneStatus::CappedAtMax), int(f.status));
     TEST_ASSERT_EQUAL(kdf_max_passes(128), f.params.passes);
     TEST_ASSERT_TRUE(kdf_params_valid(f.params));
 }
 
+void test_tune_probes_stay_short_on_slow_devices() {
+    // 3 passes take 1.2 s: probe B must not add 8 passes (3.2 s) on top.
+    Model m;
+    m.overhead_us = 0;
+    m.us_per_kib_pass = 400000.0 / 128;
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
+    TEST_ASSERT_TRUE(t.probe_b_us <= 2000000);
+    TEST_ASSERT_TRUE(m.total_us <= 4100000);
+    TEST_ASSERT_EQUAL(int(KdfTuneStatus::Ok), int(t.status));
+    TEST_ASSERT_EQUAL(5, t.params.passes);
+}
+
 void test_tune_fails_when_a_derive_cannot_run() {
-    for (int fail_at = 1; fail_at <= 4; fail_at++) {
+    for (int fail_at = 1; fail_at <= 3; fail_at++) {
         int calls = 0;
         KdfTuning t = kdf_tune(128, 2000, [&](const KdfParams& p) {
             return ++calls == fail_at ? 0u : uint32_t(p.passes * 12000 + 20000);
@@ -187,26 +189,87 @@ void test_tune_fails_when_a_derive_cannot_run() {
 void test_tune_survives_noisy_probes() {
     // Probe B no slower than A: no slope to fit, still valid parameters.
     int calls = 0;
-    KdfTuning t = kdf_tune(128, 2000, [&](const KdfParams& p) {
-        calls++;
-        return calls <= 2 ? 100000u : (calls == 3 ? 90000u : uint32_t(p.passes * 12000));
+    KdfTuning t = kdf_tune(128, 2000, [&](const KdfParams&) {
+        return ++calls <= 2 ? 100000u : 90000u;
     });
     TEST_ASSERT_TRUE(t.status != KdfTuneStatus::Failed);
     TEST_ASSERT_TRUE(kdf_params_valid(t.params));
 }
 
+void test_check_in_band_changes_nothing() {
+    Model m;
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
+    KdfParams before = t.params;
+    int calls = m.calls;
+    TEST_ASSERT_FALSE(kdf_check(t, 2400000, 2000, m.timer()));
+    TEST_ASSERT_FALSE(kdf_check(t, 1600000, 2000, m.timer()));
+    TEST_ASSERT_EQUAL(calls, m.calls);
+    TEST_ASSERT_EQUAL(before.passes, t.params.passes);
+    TEST_ASSERT_FALSE(t.retuned);
+}
+
+void test_check_rescales_a_confirmed_slow_derive() {
+    Model m;
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
+    uint32_t passes = t.params.passes;
+    m.us_per_kib_pass *= 2;  // the real derive turns out twice as slow
+    TEST_ASSERT_TRUE(kdf_check(t, uint32_t(m.ms(t.params) * 1000), 2000, m.timer()));
+    TEST_ASSERT_TRUE(t.retuned);
+    TEST_ASSERT_UINT32_WITHIN(passes / 10, passes / 2, t.params.passes);
+    TEST_ASSERT_FLOAT_WITHIN(150.0, 2000.0, m.ms(t.params));
+    // The estimate follows the retune.
+    TEST_ASSERT_UINT32_WITHIN(150, uint32_t(m.ms(t.params)), kdf_estimate_ms(t));
+    // Once only.
+    TEST_ASSERT_FALSE(kdf_check(t, 4000000, 2000, m.timer()));
+}
+
+void test_check_ignores_a_one_off_stall() {
+    Model m;
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
+    uint32_t passes = t.params.passes;
+    int calls = m.calls;
+    TEST_ASSERT_FALSE(kdf_check(t, 2900000, 2000, m.timer()));  // stalled; the re-run is fine
+    TEST_ASSERT_EQUAL(calls + 1, m.calls);
+    TEST_ASSERT_EQUAL(passes, t.params.passes);
+    TEST_ASSERT_FALSE(t.retuned);
+}
+
+void test_check_raises_a_fast_derive_without_rerun() {
+    Model m;
+    KdfTuning t = kdf_tune(128, 2000, m.timer());
+    uint32_t passes = t.params.passes;
+    int calls = m.calls;
+    TEST_ASSERT_TRUE(kdf_check(t, 1000000, 2000, m.timer()));  // a fast reading is no stall
+    TEST_ASSERT_EQUAL(calls, m.calls);
+    TEST_ASSERT_TRUE(t.params.passes > passes * 3 / 2);
+    TEST_ASSERT_TRUE(kdf_params_valid(t.params));
+}
+
+void test_check_leaves_clamped_tunings_alone() {
+    Model slow;
+    slow.us_per_kib_pass = 20000;
+    KdfTuning t = kdf_tune(128, 2000, slow.timer());
+    int calls = slow.calls;
+    TEST_ASSERT_FALSE(kdf_check(t, 7700000, 2000, slow.timer()));
+    TEST_ASSERT_FALSE(t.retuned);
+    TEST_ASSERT_EQUAL(calls, slow.calls);
+    TEST_ASSERT_EQUAL(7700000, t.check_us);
+}
+
 void test_pick_mem_follows_heap() {
     TEST_ASSERT_EQUAL(224, kdf_pick_mem(320 * 1024));
     TEST_ASSERT_EQUAL(128, kdf_pick_mem(250 * 1024));
-    TEST_ASSERT_EQUAL(128, kdf_pick_mem(160 * 1024));
-    TEST_ASSERT_EQUAL(64, kdf_pick_mem(150 * 1024));
+    TEST_ASSERT_EQUAL(128, kdf_pick_mem(224 * 1024));
+    TEST_ASSERT_EQUAL(96, kdf_pick_mem(200 * 1024));
+    TEST_ASSERT_EQUAL(64, kdf_pick_mem(160 * 1024));
     TEST_ASSERT_EQUAL(64, kdf_pick_mem(0));
     TEST_ASSERT_EQUAL(4096, kdf_pick_mem(size_t(64) * 1024 * 1024));
     for (size_t kib = 0; kib < 9000; kib += 7) {
         uint32_t mem = kdf_pick_mem(kib * 1024);
         TEST_ASSERT_EQUAL(0, mem % 8);
         TEST_ASSERT_TRUE(mem >= kMinKdfMemKib && mem <= kMaxKdfMemKib);
-        if (mem > kMinKdfMemKib) TEST_ASSERT_TRUE(mem * 1024 + 32 * 1024 <= kib * 1024);
+        // Above the format minimum, the full reserve always stays free.
+        if (mem > kMinKdfMemKib) TEST_ASSERT_TRUE(mem * 1024 + kKdfHeapReserve <= kib * 1024);
     }
 }
 
@@ -244,10 +307,15 @@ int main() {
     RUN_TEST(test_kdf_work_cap_edges);
     RUN_TEST(test_tune_hits_target_and_estimates_overhead);
     RUN_TEST(test_tune_ignores_cold_start);
-    RUN_TEST(test_tune_retunes_once_when_check_is_off);
     RUN_TEST(test_tune_reports_slow_and_fast_clamps);
+    RUN_TEST(test_tune_probes_stay_short_on_slow_devices);
     RUN_TEST(test_tune_fails_when_a_derive_cannot_run);
     RUN_TEST(test_tune_survives_noisy_probes);
+    RUN_TEST(test_check_in_band_changes_nothing);
+    RUN_TEST(test_check_rescales_a_confirmed_slow_derive);
+    RUN_TEST(test_check_ignores_a_one_off_stall);
+    RUN_TEST(test_check_raises_a_fast_derive_without_rerun);
+    RUN_TEST(test_check_leaves_clamped_tunings_alone);
     RUN_TEST(test_pick_mem_follows_heap);
     RUN_TEST(test_rng_uniform_range_and_variety);
     RUN_TEST(test_wiping_containers);

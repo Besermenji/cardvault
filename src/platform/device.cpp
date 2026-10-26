@@ -1,6 +1,7 @@
 #include "platform/device.h"
 
 #include <M5Cardputer.h>
+#include <algorithm>
 #include <Preferences.h>
 #include <esp_bt.h>
 #include <esp_heap_caps.h>
@@ -39,22 +40,24 @@ void save_settings(const Settings& s) {
     p.end();
 }
 
-KdfTuning calibrate_kdf(uint32_t target_ms) {
+uint32_t time_kdf(const KdfParams& p) {
     static const uint8_t kPass[] = {'c', 'a', 'l', 'i', 'b', 'r', 'a', 't', 'e'};
     static const uint8_t kSalt[kSaltSize] = {0};
-    KdfTimer timer = [](const KdfParams& p) -> uint32_t {
-        uint8_t out[32];
-        int64_t t0 = esp_timer_get_time();
-        if (!kdf_derive(out, kPass, sizeof kPass, kSalt, p)) return 0;
-        int64_t us = esp_timer_get_time() - t0;
-        return us < 1 ? 1 : uint32_t(us);
-    };
-    uint32_t mem = kdf_pick_mem(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    uint8_t out[32];
+    int64_t t0 = esp_timer_get_time();
+    if (!kdf_derive(out, kPass, sizeof kPass, kSalt, p)) return 0;
+    int64_t us = esp_timer_get_time() - t0;
+    return us < 1 ? 1 : uint32_t(us);
+}
+
+KdfTuning calibrate_kdf(uint32_t target_ms, uint32_t min_mem_kib) {
+    uint32_t floor = std::max(kMinKdfMemKib, std::min(min_mem_kib, kMaxKdfMemKib));
+    uint32_t mem = std::max(kdf_pick_mem(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)), floor);
     for (;;) {
-        KdfTuning t = kdf_tune(mem, target_ms, timer);
-        if (t.status != KdfTuneStatus::Failed || mem <= kMinKdfMemKib) return t;
+        KdfTuning t = kdf_tune(mem, target_ms, time_kdf);
+        if (t.status != KdfTuneStatus::Failed || mem <= floor) return t;
         // The work area did not fit after all: try a smaller one.
-        mem = mem > kMinKdfMemKib + 32 ? mem - 32 : kMinKdfMemKib;
+        mem = mem > floor + 32 ? mem - 32 : floor;
     }
 }
 

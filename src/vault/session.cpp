@@ -1,5 +1,6 @@
 #include "vault/session.h"
 
+#include <chrono>
 #include <cstring>
 
 #include "crypto/rng.h"
@@ -18,7 +19,8 @@ VaultError derive(const SString& pass, const Header& h, Key32& kek) {
 }  // namespace
 
 VaultError VaultSession::build(const VaultData& data, const SString& pass, const KdfParams& kdf,
-                               Header& hdr, uint8_t dek[32], std::vector<uint8_t>& out) {
+                               Header& hdr, uint8_t dek[32], std::vector<uint8_t>& out,
+                               const KdfCheck& check) {
     VaultError e = check_new_passphrase(pass);
     if (e != VaultError::Ok) return e;
     if (!kdf_params_valid(kdf)) return VaultError::BadParams;
@@ -26,8 +28,21 @@ VaultError VaultSession::build(const VaultData& data, const SString& pass, const
     hdr.kdf = kdf;
     header_new_salt(hdr);
     Key32 kek;
+    auto t0 = std::chrono::steady_clock::now();
     e = derive(pass, hdr, kek);
     if (e != VaultError::Ok) return e;
+    if (check) {
+        auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+        KdfParams retuned = hdr.kdf;
+        if (check(uint32_t(us < 1 ? 1 : us), retuned) && kdf_params_valid(retuned) &&
+            (retuned.mem_kib != hdr.kdf.mem_kib || retuned.passes != hdr.kdf.passes)) {
+            hdr.kdf = retuned;
+            e = derive(pass, hdr, kek);
+            if (e != VaultError::Ok) return e;
+        }
+    }
     rng_fill(dek, 32);
     header_wrap(hdr, kek.data(), dek);
 
@@ -37,10 +52,11 @@ VaultError VaultSession::build(const VaultData& data, const SString& pass, const
     return seal_file(hdr, dek, payload.data(), payload.size(), out);
 }
 
-VaultError VaultSession::create(BlobStore& store, const SString& pass, const KdfParams& kdf) {
+VaultError VaultSession::create(BlobStore& store, const SString& pass, const KdfParams& kdf,
+                                const KdfCheck& check) {
     close();
     std::vector<uint8_t> file;
-    VaultError e = build(data_, pass, kdf, hdr_, dek_.data(), file);
+    VaultError e = build(data_, pass, kdf, hdr_, dek_.data(), file, check);
     if (e != VaultError::Ok) {
         close();
         return e;
@@ -104,12 +120,12 @@ VaultError VaultSession::save(BlobStore& store) {
 }
 
 VaultError VaultSession::change_passphrase(BlobStore& store, const SString& new_pass,
-                                           const KdfParams& kdf) {
+                                           const KdfParams& kdf, const KdfCheck& check) {
     if (!open_) return VaultError::NotOpen;
     Header h;
     Key32 dek;
     std::vector<uint8_t> file;
-    VaultError e = build(data_, new_pass, kdf, h, dek.data(), file);
+    VaultError e = build(data_, new_pass, kdf, h, dek.data(), file, check);
     if (e != VaultError::Ok) return e;
     if (!store.write(file)) return VaultError::Io;
     hdr_ = h;
