@@ -425,6 +425,29 @@ void test_restore_declined_while_locked_does_not_reset_counter() {
     TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe), int(r.kind));
 }
 
+void test_oversize_or_bad_layout_costs_no_attempt() {
+    Fixture f;
+    std::vector<uint8_t> big;
+    f.store.read(big);
+    big.resize(kMaxFileSize + kPadBlock, 0);
+    f.store.blob = big;
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Damaged), int(r.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::TooLarge), int(r.error));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+
+    auto backup = make_backup("backup pass", 1);
+    backup.push_back(0);  // body no longer a multiple of the pad block
+    RestoreCheck c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    backup.assign(kMaxFileSize + kPadBlock, 0);
+    c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::TooLarge), int(c.error));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+}
+
 void test_restore_wrong_passphrase_counts_while_locked() {
     Fixture f;
     auto backup = make_backup("backup pass", 2);
@@ -728,6 +751,7 @@ int main() {
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
+    RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
     return UNITY_END();

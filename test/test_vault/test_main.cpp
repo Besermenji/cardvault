@@ -257,6 +257,50 @@ void test_too_large_rejected() {
     TEST_ASSERT_EQUAL(int(VaultError::TooLarge), int(s.save(store)));
 }
 
+static std::vector<uint8_t> sealed_image() {
+    MemoryStore st;
+    VaultSession v;
+    v.create(st, "layout test pass", kFast);
+    std::vector<uint8_t> img;
+    st.read(img);
+    return img;
+}
+
+void test_check_layout_accepts_real_image_and_returns_header() {
+    auto img = sealed_image();
+    Header h;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(img.data(), img.size(), &h)));
+    TEST_ASSERT_EQUAL(64, h.kdf.mem_kib);
+    TEST_ASSERT_EQUAL(3, h.kdf.passes);
+}
+
+void test_check_layout_rejects_bad_shapes() {
+    auto img = sealed_image();
+    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(check_layout(img.data(), 10)));
+    // Header alone, no body.
+    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(check_layout(img.data(), kHeaderSize)));
+    // Body not a multiple of the pad block.
+    auto odd = img;
+    odd.push_back(0);
+    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(check_layout(odd.data(), odd.size())));
+    auto bad_magic = img;
+    bad_magic[0] ^= 0xFF;
+    TEST_ASSERT_EQUAL(int(VaultError::BadMagic),
+                      int(check_layout(bad_magic.data(), bad_magic.size())));
+}
+
+void test_check_layout_size_cap_edges() {
+    auto img = sealed_image();
+    // Exactly the largest legal file passes the layout check.
+    std::vector<uint8_t> max_img(img.begin(), img.begin() + kHeaderSize);
+    max_img.resize(kMaxFileSize, 0);
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(max_img.data(), max_img.size())));
+    // One pad block more is refused as too large, before any parsing.
+    max_img.resize(kMaxFileSize + kPadBlock, 0);
+    TEST_ASSERT_EQUAL(int(VaultError::TooLarge),
+                      int(check_layout(max_img.data(), max_img.size())));
+}
+
 void test_remove_entry() {
     VaultData d;
     uint32_t a = d.add(make_entry(EntryType::Note, "a"));
@@ -280,6 +324,9 @@ int main() {
     RUN_TEST(test_passphrase_policy);
     RUN_TEST(test_unlock_empty_and_legacy_short_passphrases);
     RUN_TEST(test_too_large_rejected);
+    RUN_TEST(test_check_layout_accepts_real_image_and_returns_header);
+    RUN_TEST(test_check_layout_rejects_bad_shapes);
+    RUN_TEST(test_check_layout_size_cap_edges);
     RUN_TEST(test_remove_entry);
     return UNITY_END();
 }

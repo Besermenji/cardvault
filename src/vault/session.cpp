@@ -65,7 +65,7 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     if (key_ok) *key_ok = false;
     if (pass.empty()) return VaultError::EmptyPassphrase;
     Header h;
-    VaultError e = Header::decode(file.data(), file.size(), h);
+    VaultError e = check_layout(file.data(), file.size(), &h);
     if (e != VaultError::Ok) return e;
 
     Key32 kek;
@@ -129,7 +129,7 @@ void VaultSession::close() {
 }
 
 VaultError VaultSession::peek_header(const std::vector<uint8_t>& file, Header& out) {
-    return Header::decode(file.data(), file.size(), out);
+    return check_layout(file.data(), file.size(), &out);
 }
 
 }  // namespace cv

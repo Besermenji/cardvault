@@ -115,14 +115,23 @@ VaultError seal_file(const Header& h, const uint8_t dek[32], const uint8_t* payl
     return VaultError::Ok;
 }
 
-VaultError open_file(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload) {
+VaultError check_layout(const uint8_t* file, size_t len, Header* out) {
+    if (len > kMaxFileSize) return VaultError::TooLarge;
     Header h;
     VaultError e = Header::decode(file, len, h);
     if (e != VaultError::Ok) return e;
     size_t overhead = kHeaderSize + kNonceSize + kMacSize;
     if (len < overhead + kPadBlock) return VaultError::Truncated;
+    if ((len - overhead) % kPadBlock != 0) return VaultError::Corrupt;
+    if (out) *out = h;
+    return VaultError::Ok;
+}
+
+VaultError open_file(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload) {
+    VaultError e = check_layout(file, len);
+    if (e != VaultError::Ok) return e;
+    size_t overhead = kHeaderSize + kNonceSize + kMacSize;
     size_t ct_len = len - overhead;
-    if (ct_len % kPadBlock != 0 || ct_len > kMaxPayload + kPadBlock) return VaultError::Corrupt;
 
     const uint8_t* nonce = file + kHeaderSize;
     const uint8_t* mac = nonce + kNonceSize;
