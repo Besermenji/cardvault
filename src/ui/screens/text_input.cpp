@@ -132,6 +132,11 @@ public:
                                           : "ENTER ok  fn+` cancel  fn+,/ move"));
     }
 
+    void conceal() override {
+        reveal_ = false;
+        invalidate();
+    }
+
     void tick(uint32_t now) override {
         // Blink the cursor.
         bool phase = (now / 500) % 2;

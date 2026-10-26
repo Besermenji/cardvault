@@ -10,8 +10,15 @@
 #include "ui/screen.h"
 #include "vault/session.h"
 
+// How long a revealed secret stays visible without being hidden again.
+#ifndef CV_REVEAL_MS
+#define CV_REVEAL_MS 20000
+#endif
+
 namespace cv {
 namespace ui {
+
+constexpr uint32_t kRevealMs = CV_REVEAL_MS;
 
 struct App {
     VaultSession session;

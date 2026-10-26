@@ -168,10 +168,19 @@ public:
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
         out = "id=" + std::to_string(id_) + " sel=" + std::to_string(sel_) +
-              " reveal_all=" + std::to_string(reveal_all_) + " held=" + std::to_string(held_);
+              " reveal_all=" + std::to_string(reveal_all_) + " row=" + std::to_string(row_) +
+              " held=" + std::to_string(held_);
     }
 #endif
     explicit EntryViewScreen(uint32_t id) : id_(id) {}
+
+    // Coming back from a menu or editor always starts masked.
+    void on_resume() override { conceal(); }
+    void conceal() override {
+        reveal_all_ = false;
+        row_ = -1;
+        invalidate();
+    }
 
     void on_key(const Key& k) override {
         invalidate();
@@ -189,7 +198,10 @@ public:
         } else if (k.down()) {
             sel_ = (sel_ + 1) % nf;
         } else if (k.is('r') || k.is('R')) {
-            reveal_all_ = !reveal_all_;
+            bool on = !reveal_all_;
+            conceal();
+            reveal_all_ = on;
+            revealed_at_ = millis();
         } else if (k.is('e') || k.is('E')) {
             app().router.push(make_entry_edit(id_, e->type));
         } else if (k.is('t') && e->type == EntryType::Totp) {
@@ -200,8 +212,8 @@ public:
                 app().router.push(make_seed_view(id_));
             else if (field_is_multiline(f) || (e->get(f) && e->get(f)->size() > 26))
                 app().router.push(make_text_view(id_, f));
-            else
-                reveal_all_ = !reveal_all_;
+            else if (field_is_secret(f))
+                toggle_row();  // just this row; other rows have nothing to reveal
         } else if (k.is(KeyCode::Tab)) {
             open_actions();
         }
@@ -214,6 +226,7 @@ public:
             held_ = held;
             invalidate();
         }
+        if ((reveal_all_ || row_ >= 0) && now - revealed_at_ >= kRevealMs) conceal();
         uint32_t sec = now / 1000;
         if (sec != last_sec_) {
             last_sec_ = sec;
@@ -261,7 +274,8 @@ public:
             list_row(c, ry, row_h - 1, idx == sel_);
             text_small(c, 9, ry + 2, field_label(f));
             const SString& value = e->value(f);
-            bool hidden = field_is_secret(f) && !reveal_all_ && !(held_ && idx == sel_);
+            bool hidden = field_is_secret(f) && !reveal_all_ && row_ != idx &&
+                          !(held_ && idx == sel_);
             if (value.empty()) {
                 text_mono(c, 9, ry + 8, "-", color::line);
             } else if (hidden) {
@@ -280,6 +294,16 @@ public:
 
 private:
     Entry* entry() { return app().session.data().find(id_); }
+
+    // ENTER on a secret row: reveal it alone, or hide everything if all are shown.
+    void toggle_row() {
+        if (reveal_all_) {
+            conceal();
+            return;
+        }
+        row_ = row_ == sel_ ? -1 : sel_;
+        revealed_at_ = millis();
+    }
 
     void open_actions() {
         uint32_t id = id_;
@@ -315,6 +339,8 @@ private:
     int sel_ = 0;
     int first_ = 0;
     bool reveal_all_ = false;
+    int row_ = -1;  // index of the single row revealed with ENTER
+    uint32_t revealed_at_ = 0;
     bool held_ = false;
     uint32_t last_sec_ = 0;
 };
@@ -547,10 +573,19 @@ public:
         if (k.back()) app().router.pop();
         else if (k.left() || k.up()) page_ = (page_ + pages - 1) % pages;
         else if (k.right() || k.down() || k.is(KeyCode::Enter)) page_ = (page_ + 1) % pages;
-        else if (k.is('r') || k.is('R')) reveal_ = !reveal_;
+        else if (k.is('r') || k.is('R')) {
+            reveal_ = !reveal_;
+            revealed_at_ = millis();
+        }
     }
 
-    void tick(uint32_t) override {
+    void conceal() override {
+        reveal_ = false;
+        invalidate();
+    }
+
+    void tick(uint32_t now) override {
+        if (reveal_ && now - revealed_at_ >= kRevealMs) conceal();
         bool held = key_held(' ');
         if (held != held_) {
             held_ = held;
@@ -600,6 +635,7 @@ private:
     bool has_pass_ = false;
     int page_ = 0;
     bool reveal_ = false;
+    uint32_t revealed_at_ = 0;
     bool held_ = false;
 };
 
@@ -629,10 +665,19 @@ public:
         if (k.back() || k.is(KeyCode::Enter)) app().router.pop();
         else if (k.up()) scroll_ = scroll_ > 0 ? scroll_ - 1 : 0;
         else if (k.down()) scroll_++;
-        else if (k.is('r') || k.is('R')) reveal_ = !reveal_;
+        else if (k.is('r') || k.is('R')) {
+            reveal_ = !reveal_;
+            revealed_at_ = millis();
+        }
     }
 
-    void tick(uint32_t) override {
+    void conceal() override {
+        reveal_ = false;
+        invalidate();
+    }
+
+    void tick(uint32_t now) override {
+        if (reveal_ && now - revealed_at_ >= kRevealMs) conceal();
         bool held = key_held(' ');
         if (held != held_) {
             held_ = held;
@@ -669,6 +714,7 @@ private:
     SString text_, title_;
     int scroll_ = 0;
     bool reveal_ = false;
+    uint32_t revealed_at_ = 0;
     bool held_ = false;
 };
 

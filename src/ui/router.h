@@ -32,6 +32,8 @@ public:
     virtual void tick(uint32_t now_ms) { (void)now_ms; }
     // Called when this screen becomes the top again.
     virtual void on_resume() { invalidate(); }
+    // Hides anything revealed on screen (the screen dims, or a timeout ran out).
+    virtual void conceal() {}
     void invalidate() { dirty = true; }
     bool dirty = true;
 };

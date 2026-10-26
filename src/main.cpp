@@ -45,6 +45,8 @@ void handle_autolock(App& a, uint32_t now) {
         case AutolockAction::Dim:
             a.dimmed = true;
             M5Cardputer.Display.setBrightness(8);
+            // Whatever was revealed (also on screens underneath) is hidden again.
+            for (size_t i = 0; i < a.router.depth(); i++) a.router.at(i)->conceal();
             break;
         case AutolockAction::Lock:
             a.dimmed = false;
