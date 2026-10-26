@@ -42,7 +42,7 @@ jobs:
 
       - name: Release build must not contain debug or test code
         run: |
-          for marker in CVSHOT "CVTEST READY" cvt_guard "unknown command"; do
+          for marker in CVSHOT "CVTEST READY" cvt_guard "unknown command" "bad request" magic_hits; do
             if LC_ALL=C grep -a -q "$marker" .pio/build/cardputer/firmware.bin; then
               echo "release firmware contains test/debug marker: $marker"; exit 1
             fi

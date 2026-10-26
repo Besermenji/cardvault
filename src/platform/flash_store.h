@@ -25,6 +25,21 @@ public:
     bool mounted() const { return mounted_; }
     static bool has_partition();
 
+#ifdef CV_TEST_HOOKS
+    // Test builds only (e2e `storage` hook): which vault files exist, and how
+    // many times the vault magic is found anywhere in the raw partition, which
+    // also counts old copies left behind by copy-on-write.
+    struct Probe {
+        bool mounted = false;
+        bool vault = false;
+        bool tmp = false;
+        bool bak = false;
+        bool scanned = false;  // false: the partition could not be read
+        uint32_t magic_hits = 0;
+    };
+    Probe probe();
+#endif
+
 private:
     bool mounted_ = false;
     const char* label_ = nullptr;

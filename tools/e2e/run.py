@@ -141,7 +141,12 @@ class Device:
         return json.loads(self.cmd("state"))
 
     def dump(self):
+        """The unlocked session's entries (RAM only: says nothing about flash)."""
         return json.loads(self.cmd("dump"))
+
+    def storage(self):
+        """What is really stored: vault files, the raw partition, the NVS counter."""
+        return json.loads(self.cmd("storage", timeout=30))
 
     def sync(self):
         """Returns once the device has handled every key sent so far."""
@@ -208,6 +213,25 @@ def info(st):
 def check(cond, msg):
     if not cond:
         raise Fail(msg)
+
+
+def assert_vault_stored(d):
+    """A vault file exists and its ciphertext is in the raw partition."""
+    st = d.storage()
+    check(st["scanned"] and st["mounted"] and st["vault"] and st["magic_hits"] >= 1,
+          f"expected a stored vault: {st}")
+    return st
+
+
+def assert_wiped(d):
+    """Nothing of the vault is left: no files, no vault bytes anywhere in the
+    partition (old copy-on-write copies included), counter reset to 0."""
+    st = d.storage()
+    check(st["scanned"], f"could not read the partition: {st}")
+    check(not (st["vault"] or st["tmp"] or st["bak"]), f"vault files left after wipe: {st}")
+    check(st["magic_hits"] == 0, f"vault bytes left in the partition after wipe: {st}")
+    check(st["counter"] == "ok:0", f"attempt counter not reset after wipe: {st}")
+    return st
 
 
 def totp(secret_b32, t, period=30, digits=6):
@@ -287,6 +311,7 @@ def t01_factory_boot_shows_setup(d):
     d.restart_cmd("factory")
     st = d.screen("setup")
     check(not st["open"] and st["fails"] == 0, f"unexpected state {st}")
+    assert_wiped(d)
 
 
 def t02_setup_validation_and_create(d):
@@ -571,6 +596,7 @@ def t15_power_cut_mid_attempt_still_counts(d):
 
 
 def t16_ten_wrong_passphrases_wipe(d):
+    assert_vault_stored(d)  # so the wiped check below can tell the two apart
     d.lock()
     for i in range(1, 11):
         st = d.wait(lambda s: s["screen"] != "unlock" or int(info(s)["wait_ms"]) == 0,
@@ -596,11 +622,12 @@ def t16_ten_wrong_passphrases_wipe(d):
     d.connect(timeout=40)
     st = d.screen("setup", timeout=30)
     check(st["fails"] == 0, f"counter must be cleared after the wipe: {st}")
-    check(d.dump() == [], "data left after wipe")
+    assert_wiped(d)
 
 
 def t17_erase_from_settings(d):
     t02_setup_validation_and_create(d)
+    assert_vault_stored(d)
     d.key("tab")
     d.menu_pick("Settings")
     d.screen("settings")
@@ -615,7 +642,8 @@ def t17_erase_from_settings(d):
     d.type("ERASE")
     d.restart_cmd("key enter")  # erases, reboots and reconnects
     st = d.screen("setup", timeout=40)
-    check(d.dump() == [] and st["fails"] == 0, f"vault not erased: {st}")
+    check(st["fails"] == 0, f"counter not reset: {st}")
+    assert_wiped(d)
 
 
 def t18_tab_never_saves(d):

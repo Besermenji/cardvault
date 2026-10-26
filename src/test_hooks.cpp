@@ -113,6 +113,25 @@ void dump(ui::App& a) {
     reply(j + "]");
 }
 
+// What is really on flash/NVS, not what the session holds in RAM.
+void storage(ui::App& a) {
+    FlashStore::Probe pr = a.store.probe();
+    uint32_t fails = 0;
+    KvRead kr = a.guard_kv.get_u32("fails", fails);
+    std::string counter = kr == KvRead::Ok ? "ok:" + std::to_string(fails)
+                          : kr == KvRead::Missing ? "missing" : "error";
+    auto b = [](bool v) { return v ? "true" : "false"; };
+    std::string j = "{";
+    j += "\"mounted\":" + std::string(b(pr.mounted));
+    j += ",\"vault\":" + std::string(b(pr.vault));
+    j += ",\"tmp\":" + std::string(b(pr.tmp));
+    j += ",\"bak\":" + std::string(b(pr.bak));
+    j += ",\"scanned\":" + std::string(b(pr.scanned));
+    j += ",\"magic_hits\":" + std::to_string(pr.magic_hits);
+    j += ",\"counter\":\"" + counter + "\"}";
+    reply(j);
+}
+
 // "<id> <command> [argument]"; the id is a decimal number chosen by the host.
 void handle(ui::App& a, const std::string& request) {
     std::string line;
@@ -143,6 +162,8 @@ void handle(ui::App& a, const std::string& request) {
         state(a);
     } else if (cmd == "dump") {
         dump(a);
+    } else if (cmd == "storage") {
+        storage(a);
     } else if (cmd == "key") {
         ui::Key k;
         if (!key_named(arg, k)) return error("unknown key");
