@@ -419,32 +419,48 @@ void start_mnemonic_flow(const SString& current, TextDone done) {
     items.push_back({"Free text (non-BIP39)", [box, done] {
                          InputOpts o;
                          o.multiline = true;
+                         o.non_blank = true;
                          o.hint = "Any words/format. TAB when done.";
                          app().router.push(make_text_input("Seed words", box->value, o, done));
                      }});
     app().router.push(make_menu("Seed phrase", std::move(items)));
 }
 
-void ask_set_time(std::function<void()> done) {
-    char now[20] = "2026-01-01 12:00";
-    if (device::time_valid()) {
-        format_utc(device::unix_time(), now);
-        now[16] = '\0';  // drop seconds
-    }
+namespace {
+
+// A rejected value comes back as `initial` so a typo is fixed, not retyped.
+void ask_clock(const SString& initial, std::function<void()> done) {
     InputOpts o;
     o.hint = "UTC time: YYYY-MM-DD HH:MM[:SS]";
     o.max_len = 19;
-    app().router.push(make_text_input("Set clock (UTC)", now, o, [done](SString& v) {
+    app().router.push(make_text_input("Set clock (UTC)", initial, o, [done](SString& v) {
         uint32_t t;
         if (!parse_utc(v.c_str(), t)) {
             app().toast("Invalid date/time", color::bad);
-            ask_set_time(done);
+            ask_clock(v, done);
+            return;
+        }
+        if (t < kClockFloor) {
+            app().toast("Date before 2025-01-01", color::bad);
+            ask_clock(v, done);
             return;
         }
         device::set_unix_time(t);
         app().toast("Clock set");
         if (done) done();
     }));
+}
+
+}  // namespace
+
+void ask_set_time(std::function<void()> done) {
+    // Pre-fill the real time when the clock is set; never a made-up date.
+    char now[20] = "";
+    if (device::time_valid()) {
+        format_utc(device::unix_time(), now);
+        now[16] = '\0';  // drop seconds
+    }
+    ask_clock(now, std::move(done));
 }
 
 }  // namespace ui

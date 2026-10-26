@@ -60,8 +60,10 @@ public:
     size_t pending() const { return ops_.size(); }
     Screen* at(size_t i) { return i < stack_.size() ? stack_[i].get() : nullptr; }
 
-    void apply() {
-        if (ops_.empty()) return;
+    // Returns true when navigation ran (the top screen was pushed, popped or
+    // replaced), so callers can drop state tied to the previous screen.
+    bool apply() {
+        if (ops_.empty()) return false;
         auto ops = std::move(ops_);
         ops_.clear();
         for (auto& op : ops) {
@@ -74,6 +76,7 @@ public:
             }
         }
         if (Screen* t = top()) t->on_resume();
+        return true;
     }
 
 private:

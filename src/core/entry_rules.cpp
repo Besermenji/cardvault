@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "features/base32.h"
 
@@ -75,11 +76,48 @@ uint8_t entry_defining_field(EntryType t) {
     return 0;
 }
 
-bool field_value_empty(uint8_t key, const SString& value) {
-    if (key == kFieldPassword || key == kFieldBip39Pass) return value.empty();
+bool is_blank(const SString& value) {
     for (char c : value)
         if (!is_space(c)) return false;
     return true;
+}
+
+bool field_value_empty(uint8_t key, const SString& value) {
+    if (key == kFieldPassword || key == kFieldBip39Pass) return value.empty();
+    return is_blank(value);
+}
+
+namespace {
+
+// [begin, end) of the value as finalize_entry stores it.
+void stored_range(const SString* v, bool verbatim, size_t& begin, size_t& end) {
+    begin = 0;
+    end = v ? v->size() : 0;
+    if (!v || verbatim) return;
+    while (end > 0 && is_space((*v)[end - 1])) end--;
+    while (begin < end && is_space((*v)[begin])) begin++;
+}
+
+bool same_stored(const SString* a, const SString* b, bool verbatim) {
+    size_t ab, ae, bb, be;
+    stored_range(a, verbatim, ab, ae);
+    stored_range(b, verbatim, bb, be);
+    if (ae - ab != be - bb) return false;
+    return ae == ab || memcmp(a->data() + ab, b->data() + bb, ae - ab) == 0;
+}
+
+bool fields_covered(const Entry& a, const Entry& b) {
+    for (auto& f : a.fields)
+        if (!same_stored(&f.value, b.get(f.key), keep_verbatim(f.key))) return false;
+    return true;
+}
+
+}  // namespace
+
+bool entry_content_equal(const Entry& a, const Entry& b) {
+    if (a.type != b.type) return false;
+    if (!same_stored(&a.title, &b.title, false)) return false;
+    return fields_covered(a, b) && fields_covered(b, a);
 }
 
 void totp_settings(const Entry& e, int& digits, uint32_t& period) {

@@ -170,4 +170,48 @@ AutolockAction autolock_step(bool unlocked, bool dimmed, uint32_t idle_ms, uint3
     return AutolockAction::None;
 }
 
+bool put_entry(VaultData& data, const Entry& entry, uint32_t& id,
+               const std::function<bool()>& persist) {
+    if (Entry* existing = data.find(id)) {
+        Entry previous = *existing;
+        existing->clear();
+        *existing = entry;
+        existing->id = id;
+        bool saved = persist && persist();
+        if (!saved) {
+            // Not on flash: put the old version back in its slot.
+            Entry* slot = data.find(id);
+            slot->clear();
+            *slot = previous;
+        }
+        previous.clear();
+        return saved;
+    }
+    uint32_t next = data.next_id;
+    uint32_t added = data.add(entry);
+    if (!(persist && persist())) {
+        data.remove(added);
+        data.next_id = next;
+        return false;
+    }
+    id = added;
+    return true;
+}
+
+bool delete_entry(VaultData& data, uint32_t id, const std::function<bool()>& persist) {
+    const Entry* e = data.find(id);
+    if (!e) return false;
+    size_t index = size_t(e - data.entries.data());
+
+    Entry backup = *e;
+    data.remove(id);
+    bool saved = persist && persist();
+    if (!saved) {
+        // Not on flash: undo, keeping order, id and the id counter.
+        data.entries.insert(data.entries.begin() + long(index), backup);
+    }
+    backup.clear();
+    return saved;
+}
+
 }  // namespace cv

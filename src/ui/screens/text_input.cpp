@@ -1,6 +1,7 @@
 // Single-line and multi-line text editor, optionally masked.
 #include <cmath>
 
+#include "core/entry_rules.h"
 #include "features/pwgen.h"
 #include "ui/app.h"
 
@@ -21,13 +22,23 @@ public:
     }
 #endif
     TextInputScreen(const char* title, const SString& initial, InputOpts o, TextDone done)
-        : title_(title), buf_(initial), cur_(initial.size()), o_(o), done_(std::move(done)) {}
-    ~TextInputScreen() override { wipe(buf_); }
+        : title_(title), buf_(initial), initial_(initial), cur_(initial.size()), o_(o),
+          done_(std::move(done)) {}
+    ~TextInputScreen() override {
+        wipe(buf_);
+        wipe(initial_);
+    }
 
     void on_key(const Key& k) override {
         invalidate();
         switch (k.code) {
-            case KeyCode::Esc: app().router.pop(); return;
+            case KeyCode::Esc:
+                if (o_.confirm_discard && buf_ != initial_)
+                    app().router.push(make_confirm("Discard changes?", "What you typed is lost.",
+                                                   [] { app().router.pop(); }));
+                else
+                    app().router.pop();
+                return;
             case KeyCode::Opt:
                 if (o_.mask) reveal_ = !reveal_;
                 return;
@@ -145,6 +156,10 @@ private:
             app().toast(msg, color::warn);
             return;
         }
+        if (o_.non_blank && is_blank(buf_)) {
+            app().toast("Can't be empty", color::warn);
+            return;
+        }
         TextDone done = done_;
         SString value = buf_;
         app().router.pop();
@@ -163,6 +178,7 @@ private:
 
     const char* title_;
     SString buf_;
+    SString initial_;  // Esc compares against it
     size_t cur_;
     InputOpts o_;
     TextDone done_;
@@ -313,6 +329,7 @@ ScreenPtr make_message(const char* title, const char* msg, uint16_t accent,
 InputOpts existing_passphrase_opts(const char* hint) {
     InputOpts o;
     o.mask = true;
+    o.confirm_discard = false;
     o.min_len = 1;
     o.max_len = kMaxPassphraseLen;
     o.hint = hint;
@@ -332,6 +349,7 @@ void ask_new_passphrase(const char* title, TextDone done) {
     InputOpts o;
     o.mask = true;
     o.strength = true;
+    o.confirm_discard = false;
     o.min_len = kMinPassphraseLen;
     o.max_len = kMaxPassphraseLen;
     o.hint = "Best: 6+ generated BIP39 words (Tools)";
@@ -347,6 +365,7 @@ void ask_new_passphrase(const char* title, TextDone done) {
         auto first_copy = std::make_shared<SecretBox>(first);
         InputOpts c;
         c.mask = true;
+        c.confirm_discard = false;
         c.max_len = kMaxPassphraseLen;
         c.hint = "Type it again to confirm";
         app().router.push(make_text_input("Confirm passphrase", "", c,

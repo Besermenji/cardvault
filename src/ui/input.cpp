@@ -4,25 +4,19 @@
 
 #include <vector>
 
+#include "ui/key_stream.h"
+
 namespace cv {
 namespace ui {
 
 namespace {
-constexpr uint32_t kRepeatDelay = 450;
-constexpr uint32_t kRepeatRate = 70;
+KeyStream g_stream;
 
-std::vector<Point2D_t> g_prev;
-std::vector<Key> g_queue;
-Key g_last;
-bool g_has_last = false;
-Point2D_t g_last_pos;
-uint32_t g_repeat_at = 0;
-
-bool contains(const std::vector<Point2D_t>& v, const Point2D_t& p) {
-    for (auto& q : v)
-        if (q.x == p.x && q.y == p.y) return true;
-    return false;
-}
+#ifdef CV_TEST_HOOKS
+// Simulated physical key (test builds): scanned like a real one, so it takes
+// the same press/repeat path. Marked with x = -1, y = the character.
+char g_sim_down = 0;
+#endif
 
 bool make_key(const Point2D_t& pos, const Keyboard_Class::KeysState& st, Key& k) {
     auto& kb = M5Cardputer.Keyboard;
@@ -69,44 +63,35 @@ bool make_key(const Point2D_t& pos, const Keyboard_Class::KeysState& st, Key& k)
 
 bool poll_key(Key& out) {
     auto& kb = M5Cardputer.Keyboard;
-    const auto& now_keys = kb.keyList();
-    uint32_t now = millis();
-
-    // Diff against the previous poll ourselves: the library's isChange() only
-    // compares the number of pressed keys and misses fast key rolls.
-    bool changed = now_keys.size() != g_prev.size();
-    for (auto& pos : now_keys) {
-        if (contains(g_prev, pos)) continue;  // only newly pressed keys
-        changed = true;
-        Key k;
-        if (make_key(pos, kb.keysState(), k)) {
-            g_queue.push_back(k);
-            g_last = k;
-            g_last_pos = pos;
-            g_has_last = k.code != KeyCode::Opt && k.code != KeyCode::Tab &&
-                         k.code != KeyCode::Enter && k.code != KeyCode::Esc;
-            g_repeat_at = now + kRepeatDelay;
+    std::vector<KeyPos> down;
+    for (auto& p : kb.keyList()) down.push_back({p.x, p.y});
+#ifdef CV_TEST_HOOKS
+    if (g_sim_down) down.push_back({-1, g_sim_down});
+#endif
+    g_stream.scan(down, millis(), [&kb](const KeyPos& pos, Key& k) {
+#ifdef CV_TEST_HOOKS
+        if (pos.x == -1) {
+            k = Key();
+            k.ch = char(pos.y);
+            return true;
         }
-    }
-    if (changed) {
-        g_prev.assign(now_keys.begin(), now_keys.end());
-    } else if (g_has_last && contains(now_keys, g_last_pos) && now >= g_repeat_at) {
-        g_queue.push_back(g_last);
-        g_repeat_at = now + kRepeatRate;
-    }
-    if (!contains(now_keys, g_last_pos)) g_has_last = false;
-
-    if (g_queue.empty()) return false;
-    out = g_queue.front();
-    g_queue.erase(g_queue.begin());
-    return true;
+#endif
+        Point2D_t p;
+        p.x = pos.x;
+        p.y = pos.y;
+        return make_key(p, kb.keysState(), k);
+    });
+    return g_stream.next(out);
 }
+
+void drop_pending_keys() { g_stream.drop_pending(); }
 
 #ifdef CV_TEST_HOOKS
 namespace {
 char g_held_override = 0;
 }
-void inject_key(const Key& k) { g_queue.push_back(k); }
+void inject_key(const Key& k) { g_stream.inject(k); }
+void set_sim_pressed(char c) { g_sim_down = c; }
 void set_held_override(char c, bool held) { g_held_override = held ? c : 0; }
 bool key_held(char c) {
     return (g_held_override && g_held_override == c) || M5Cardputer.Keyboard.isKeyPressed(c);

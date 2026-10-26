@@ -31,6 +31,10 @@ struct Key {
 
 // Returns true and fills `out` when a key event is available.
 bool poll_key(Key& out);
+// Drops key events not yet delivered and stops the held key from
+// auto-repeating. Called when the screen changes, so keys meant for the old
+// screen (a held or rolled Y on a confirm) never reach the next one.
+void drop_pending_keys();
 // True while the physical key that produces `c` is held down.
 bool key_held(char c);
 
@@ -38,6 +42,9 @@ bool key_held(char c);
 // Test builds only: queue a synthetic key event / simulate a held key.
 void inject_key(const Key& k);
 void set_held_override(char c, bool held);
+// Simulates physically holding the key for `c` (0 = release): unlike
+// inject_key it goes through the press and auto-repeat path.
+void set_sim_pressed(char c);
 #endif
 
 }  // namespace ui

@@ -248,6 +248,7 @@ private:
         items.push_back({"Restore SD backup", [] { start_restore_flow(); }});
         items.push_back({"Erase vault", [] {
                              InputOpts o;
+                             o.confirm_discard = false;
                              o.hint = "Type ERASE to destroy all data";
                              app().router.push(make_text_input(
                                  "Erase vault", "", o, [](SString& s) {

@@ -138,6 +138,7 @@ void change_passphrase_flow() {
 
 void erase_flow() {
     InputOpts o;
+    o.confirm_discard = false;
     o.hint = "Type ERASE to destroy all data";
     app().router.push(make_text_input("Erase vault", "", o, [](SString& s) {
         if (s == "ERASE") app().wipe_and_reboot("Erasing on request.");

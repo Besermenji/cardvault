@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "core/entry_rules.h"
+#include "core/flows.h"
 #include "features/base32.h"
 #include "features/bip39.h"
 #include "features/totp.h"
@@ -295,9 +296,13 @@ private:
                              app().router.push(make_confirm(
                                  "Delete secret?", "This cannot be undone (unless you have a backup).",
                                  [id] {
-                                     app().session.data().remove(id);
-                                     if (app().save()) app().toast("Deleted", color::warn);
-                                     app().router.pop();  // leave the (now empty) entry view
+                                     // On a failed save the entry is restored and
+                                     // App::save has shown the error; stay on it.
+                                     if (delete_entry(app().session.data(), id,
+                                                      [] { return app().save(); })) {
+                                         app().toast("Deleted", color::warn);
+                                         app().router.pop();  // leave the (now empty) entry view
+                                     }
                                  },
                                  color::bad));
                          },
@@ -320,7 +325,7 @@ public:
     const char* name() const override { return "entry_edit"; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        out = "sel=" + std::to_string(sel_) + " dirty=" + std::to_string(dirty_) +
+        out = "sel=" + std::to_string(sel_) + " dirty=" + std::to_string(dirty()) +
               " type=" + std::to_string(int(draft_.type));
     }
 #endif
@@ -333,10 +338,17 @@ public:
                 draft_.set(kFieldTotpDigits, "6");
                 draft_.set(kFieldTotpPeriod, "30");
             }
-            if (prefill && type == EntryType::Password) draft_.set(kFieldPassword, *prefill);
         }
+        original_ = draft_;
+        // Taken after the snapshot: a generated password is not stored yet,
+        // so Esc must ask before dropping it.
+        if (!original_.id && prefill && type == EntryType::Password)
+            draft_.set(kFieldPassword, *prefill);
     }
-    ~EntryEditScreen() override { draft_.clear(); }
+    ~EntryEditScreen() override {
+        draft_.clear();
+        original_.clear();
+    }
 
     void on_key(const Key& k) override {
         invalidate();
@@ -344,7 +356,7 @@ public:
         const uint8_t* fields = entry_type_fields(draft_.type, nf);
         int rows = nf + 2;  // title + fields + save
         if (k.back()) {
-            if (!dirty_) {
+            if (!dirty()) {
                 app().router.pop();
                 return;
             }
@@ -412,10 +424,8 @@ private:
     void edit_title() {
         InputOpts o;
         o.max_len = 60;
-        app().router.push(make_text_input("Title", draft_.title, o, [this](SString& v) {
-            draft_.title = v;
-            dirty_ = true;
-        }));
+        app().router.push(make_text_input("Title", draft_.title, o,
+                                          [this](SString& v) { draft_.title = v; }));
     }
 
     void edit_field(uint8_t f) {
@@ -429,7 +439,7 @@ private:
         }
         InputOpts o;
         o.multiline = field_is_multiline(f);
-        o.mask = f == kFieldPassword || f == kFieldBip39Pass;
+        o.mask = f == kFieldPassword || f == kFieldBip39Pass || f == kFieldTotpSecret;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
         app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
             set_field(f, v);
@@ -442,7 +452,6 @@ private:
         const SString* old = draft_.get(f);
         if (!field_value_empty(f, v) || !old || field_value_empty(f, *old)) {
             draft_.set(f, v);
-            dirty_ = true;
             return;
         }
         if (f == entry_defining_field(draft_.type)) {
@@ -454,30 +463,22 @@ private:
         char title[32];
         snprintf(title, sizeof title, "Clear %s?", field_label(f));
         app().router.push(make_confirm(title, "The stored value is removed when you save.",
-                                       [this, f] {
-                                           draft_.set(f, SString());
-                                           dirty_ = true;
-                                       },
+                                       [this, f] { draft_.set(f, SString()); },
                                        color::warn));
     }
 
     void cycle(uint8_t f, bool fwd) {
         if (f == kFieldTotpDigits) {
             draft_.set(f, draft_.get_or(f, "6") == "6" ? "8" : "6");
-            dirty_ = true;
         } else if (f == kFieldTotpPeriod) {
             draft_.set(f, draft_.get_or(f, "30") == "30" ? "60" : "30");
-            dirty_ = true;
         }
         (void)fwd;
     }
 
     void generate() {
         auto open = [this] {
-            app().router.push(make_pwgen([this](SString& v) {
-                draft_.set(kFieldPassword, v);
-                dirty_ = true;
-            }));
+            app().router.push(make_pwgen([this](SString& v) { draft_.set(kFieldPassword, v); }));
         };
         const SString* old = draft_.get(kFieldPassword);
         if (!old || old->empty()) {
@@ -496,43 +497,24 @@ private:
             return;
         }
         uint32_t now = device::unix_time();
-        auto& data = app().session.data();
         draft_.updated = now;
+        if (!id_) draft_.created = now;
         uint32_t id = id_;
-        Entry previous;
-        if (Entry* existing = data.find(id_)) {
-            previous = *existing;
-            existing->clear();
-            *existing = draft_;
-        } else {
-            draft_.created = now;
-            id = data.add(draft_);
-        }
-        if (!app().save()) {
-            // Keep memory consistent with flash: undo the change.
-            if (Entry* e = data.find(id)) {
-                if (id_) {
-                    e->clear();
-                    *e = previous;
-                } else {
-                    data.remove(id);
-                }
-            }
-            previous.clear();
-            return;
-        }
-        previous.clear();
-        dirty_ = false;
+        // On failure memory is restored and App::save has shown the error.
+        if (!put_entry(app().session.data(), draft_, id, [] { return app().save(); })) return;
         app().toast(warning ? warning : "Saved", warning ? color::warn : color::good);
         app().router.pop();
         if (!id_) app().router.push(make_entry_view(id));
     }
 
+    // Unsaved changes, judged by content: undoing an edit makes it clean again.
+    bool dirty() const { return !entry_content_equal(draft_, original_); }
+
     uint32_t id_;
     Entry draft_;
+    Entry original_;  // what was stored (or the blank new entry) when opened
     int sel_ = 0;
     int first_ = 0;
-    bool dirty_ = false;
 };
 
 // ---------------------------------------------------------------------------

@@ -15,6 +15,15 @@ const char* finalize_entry(Entry& draft, const char** warning = nullptr);
 // The field an entry of this type cannot be saved without.
 uint8_t entry_defining_field(EntryType t);
 
+// True when the value is empty or only whitespace.
+bool is_blank(const SString& value);
+
+// Whether two entries hold the same content as finalize_entry would save it:
+// same type, title and field values after trimming (verbatim fields compared
+// exactly), a missing field equal to an empty one. Ids and timestamps are
+// ignored. Compares in place, without copying any value.
+bool entry_content_equal(const Entry& a, const Entry& b);
+
 // Whether a value counts as empty for this field: passwords and BIP39
 // passphrases are verbatim, so only "" is empty; elsewhere whitespace-only is.
 bool field_value_empty(uint8_t key, const SString& value);

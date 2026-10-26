@@ -7,6 +7,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Destructive and sloppy input paths now ask or validate (#38). Esc in a text input whose text
+  differs from what it started with asks before discarding it, masked secrets included (passphrase
+  prompts and typing ERASE still close at once). A free-text seed must contain a visible character
+  and the 2FA secret is masked while typing (OPT shows it). Saving or deleting an entry puts memory
+  back exactly as it was if writing to flash fails. The editor compares against what is stored, so
+  undoing an edit leaves nothing to discard, while a generated password you have not saved asks
+  before Esc drops it. Set clock starts empty when no time was set (no invented date), accepts only
+  `YYYY-MM-DD HH:MM[:SS]`, refuses dates before 2025-01-01, and gives a refused value back for
+  fixing. Keys held or queued when the screen changes no longer reach the next screen.
 - Unlocking now really costs ~2 s of Argon2id (#37). Setup used to extrapolate from one cold timing
   and landed near 0.7 s. It now separates the fixed cost from the per-pass cost and checks the
   vault's real key derivation once. Argon2 memory is sized from the free heap, and Change

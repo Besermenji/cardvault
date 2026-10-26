@@ -807,6 +807,176 @@ def t21_sd_compact_with_safety_copy(d):
     go_home(d)
 
 
+def t22_confirm_and_validation(d):
+    # Regression #38: Esc loses typed text, blank seeds, visible TOTP secret,
+    # spurious dirty flag, made-up clock default.
+    st = d.state()
+    if st["screen"] == "unlock":
+        d.unlock(P3 if SD_CARD else P1)  # t20 restores a backup made with P3
+    go_home(d)
+    stored = len(d.dump())
+    memo = f"Memo{int(time.time()) % 100000}"  # unique, so reruns find only this one
+
+    # Esc in an edited text input asks; an untouched one closes at once.
+    new_entry(d, "Note")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.key("esc")
+    d.screen("entry_edit")  # nothing typed: no question
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("ab")
+    d.key("bs", 2)
+    d.key("esc")
+    d.screen("entry_edit")  # typed and erased: same as the start, no question
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("keep me")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("n")
+    st = d.screen("text_input", "Text")
+    check(info(st)["len"] == "7", f"declining must keep the text: {st}")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"discarded text must not dirty the draft: {st}")
+    check(len(d.dump()) == stored, "discarding must not save anything")
+
+    # Saving the same value is not a change.
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("x")
+    d.key("tab")
+    d.screen("entry_edit")
+    set_title(d, memo)
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"fresh editor must be clean: {st}")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.key("tab")  # same text
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"re-saving the same text marked it dirty: {st}")
+    d.key("up")
+    d.key("enter")
+    d.screen("text_input", "Title")
+    d.key("enter")  # same title
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"re-entering the same title marked it dirty: {st}")
+    d.key("esc")
+    d.screen("entry_view")
+
+    # Free-text seed must contain a visible character.
+    new_entry(d, "Seed phrase")
+    d.key("down")
+    d.key("enter")
+    d.menu_pick("Free text (non-BIP39)")
+    d.screen("text_input", "Seed words")
+    d.type("   ")
+    d.key("tab")
+    d.toast("empty")
+    d.screen("text_input", "Seed words")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    d.screen("entry_edit")
+
+    # The TOTP secret is masked until OPT.
+    new_entry(d, "2FA (TOTP)")
+    d.key("down", 2)  # Secret
+    d.key("enter")
+    d.screen("text_input", "Secret (base32)")
+    d.type("JBSWY3DP")
+    st = d.state()
+    check(info(st)["reveal"] == "0", f"TOTP secret input must start masked: {st}")
+    d.key("opt")
+    st = d.state()
+    check(info(st)["reveal"] == "1", f"OPT should reveal the secret: {st}")
+    d.key("esc")  # a typed secret is worth a question, masked or not
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "0", f"discarded secret must not dirty the draft: {st}")
+    d.key("down")  # Digits: 6 -> 8 -> 6 is no change
+    d.key("enter")
+    st = d.state()
+    check(info(st)["dirty"] == "1", f"changing Digits should dirty the draft: {st}")
+    d.key("enter")
+    st = d.state()
+    check(info(st)["dirty"] == "0", f"Digits back to 6 must be clean again: {st}")
+    d.key("esc")
+    d.screen("home")
+
+    # A generated password is unsaved: Esc must ask before dropping it.
+    d.key("tab")
+    d.menu_pick("Password generator")
+    d.screen("pwgen")
+    d.key("tab")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "1", f"generated password must start dirty: {st}")
+    d.key("esc")
+    d.screen("confirm", "Discard changes?")
+    d.key("y")
+    d.screen("home")
+
+    # A physically held key must not repeat into the next screen: Y on the
+    # delete confirm, held well past the repeat delay, then home's search box.
+    d.type(memo)
+    d.wait(lambda s: info(s)["rows"] == "1", f"search finds {memo}")
+    d.key("enter")
+    d.screen("entry_view")
+    d.key("tab")
+    d.menu_pick("Delete")
+    d.screen("confirm", "Delete secret?")
+    d.cmd("press y 1")
+    try:
+        st = d.screen("home")
+        time.sleep(1.5)  # > 450 ms repeat delay
+    finally:
+        d.cmd("press y 0")
+    st = d.state()
+    check(st["entries"] == stored, f"held Y should have deleted {memo}: {st}")
+    check(info(st)["query"] == memo, f"held Y repeated into the next screen: {st}")
+    d.key("esc")  # clear the search
+    d.screen("home")
+
+    # Set clock: starts empty when unset, refuses old dates and trailing text,
+    # and a refused value comes back for fixing.
+    d.cmd("settime 0")
+    try:
+        d.key("tab")
+        d.menu_pick("2FA codes")
+        d.screen("totp_list")
+        d.key("t")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "0", f"clock input must not be pre-filled when unset: {st}")
+        d.type("2024-12-31 23:59")
+        d.key("enter")
+        d.toast("before 2025")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "16", f"a refused date must come back for fixing: {st}")
+        d.key("bs", 16)
+        d.type("2026-01-01 12:00xyz")
+        d.key("enter")
+        d.toast("Invalid")
+        st = d.screen("text_input", "Set clock (UTC)")
+        check(info(st)["len"] == "19", f"refused text must come back for fixing: {st}")
+        d.key("bs", 3)
+        d.key("enter")
+        d.toast("Clock set")
+        d.screen("totp_list")
+        d.key("esc")
+        go_home(d)
+    finally:
+        d.cmd(f"settime {int(time.time())}")
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 

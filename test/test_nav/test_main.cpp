@@ -9,6 +9,7 @@
 #include "core/flows.h"
 #include "core/messages.h"
 #include "crypto/kdf.h"
+#include "ui/key_stream.h"
 #include "vault/serializer.h"
 
 using namespace cv;
@@ -75,6 +76,97 @@ void test_router_push_pop_replace_reset() {
     r.pop();  // popping an empty stack is harmless
     r.apply();
     TEST_ASSERT_EQUAL(0, r.depth());
+}
+
+void test_router_apply_reports_navigation() {
+    Router r;
+    TEST_ASSERT_FALSE(r.apply());  // nothing queued
+    r.push(fake("a"));
+    TEST_ASSERT_TRUE(r.apply());
+    TEST_ASSERT_FALSE(r.apply());  // already applied
+    r.push(fake("b"));
+    r.pop();
+    TEST_ASSERT_TRUE(r.apply());
+    r.replace(fake("c"));
+    TEST_ASSERT_TRUE(r.apply());
+    r.reset(fake("d"));
+    TEST_ASSERT_TRUE(r.apply());
+    TEST_ASSERT_FALSE(r.apply());
+}
+
+// ---- Key stream ---------------------------------------------------------------
+
+// Every position is the character key `y` + its x (so two positions differ).
+static bool make_char(const KeyPos& p, Key& k) {
+    k = Key();
+    k.ch = char('y' + p.x);
+    return true;
+}
+
+static std::string drain(KeyStream& s) {
+    std::string out;
+    Key k;
+    while (s.next(k)) out += k.ch;
+    return out;
+}
+
+void test_keystream_press_and_repeat() {
+    KeyStream s;
+    std::vector<KeyPos> y = {{0, 0}};
+    s.scan(y, 1000, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay - 1, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay + KeyStream::kRepeatRate, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan({}, 3000, make_char);
+    s.scan({}, 4000, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+}
+
+void test_keystream_enter_never_repeats() {
+    KeyStream s;
+    auto enter = [](const KeyPos&, Key& k) {
+        k = Key();
+        k.code = KeyCode::Enter;
+        return true;
+    };
+    std::vector<KeyPos> held = {{0, 0}};
+    s.scan(held, 0, enter);
+    s.scan(held, 5000, enter);
+    TEST_ASSERT_EQUAL(1, int(s.pending()));
+}
+
+void test_keystream_held_key_stops_after_screen_change() {
+    // Y on a confirm navigates; holding it must not type into the next screen.
+    KeyStream s;
+    std::vector<KeyPos> y = {{0, 0}};
+    s.scan(y, 0, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.drop_pending();  // what the main loop does after navigation
+    for (uint32_t t = 100; t <= 3000; t += 50) s.scan(y, t, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+    // Released and pressed again: works as usual.
+    s.scan({}, 3100, make_char);
+    s.scan(y, 3200, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+}
+
+void test_keystream_drop_discards_queued_roll() {
+    // Two keys land in one scan: the first navigates, the second is dropped.
+    KeyStream s;
+    s.scan({{0, 0}, {1, 0}}, 0, make_char);
+    TEST_ASSERT_EQUAL(2, int(s.pending()));
+    Key k;
+    TEST_ASSERT_TRUE(s.next(k));
+    TEST_ASSERT_EQUAL('y', k.ch);
+    s.drop_pending();
+    TEST_ASSERT_FALSE(s.next(k));
+    // A key pressed while another is held is still seen.
+    s.scan({{0, 0}, {1, 0}, {2, 0}}, 100, make_char);
+    TEST_ASSERT_EQUAL_STRING("{", drain(s).c_str());
 }
 
 void test_router_resumes_new_top_and_orders_ops() {
@@ -448,6 +540,99 @@ void test_oversize_or_bad_layout_costs_no_attempt() {
     TEST_ASSERT_EQUAL(0, f.guard.failures());
 }
 
+// ---- Delete ---------------------------------------------------------------------
+
+static Entry make_entry(const char* title, const char* secret) {
+    Entry e;
+    e.type = EntryType::Password;
+    e.title = title;
+    e.set(kFieldPassword, secret);
+    return e;
+}
+
+void test_put_entry_adds_and_replaces() {
+    VaultData d;
+    uint32_t id = 0;
+    TEST_ASSERT_TRUE(put_entry(d, make_entry("a", "pw-a"), id, [] { return true; }));
+    TEST_ASSERT_EQUAL_UINT32(1, id);
+    Entry changed = make_entry("a2", "pw-a2");
+    TEST_ASSERT_TRUE(put_entry(d, changed, id, [] { return true; }));
+    TEST_ASSERT_EQUAL_UINT32(1, id);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
+    TEST_ASSERT_EQUAL_UINT32(1, d.entries[0].id);
+    TEST_ASSERT_EQUAL_STRING("pw-a2", d.entries[0].get_or(kFieldPassword).c_str());
+}
+
+void test_put_entry_rolls_back_when_save_fails() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    uint32_t next = d.next_id;
+    // New entry: removed again, id counter unchanged.
+    uint32_t id = 0;
+    TEST_ASSERT_FALSE(put_entry(d, make_entry("c", "pw-c"), id, [] { return false; }));
+    TEST_ASSERT_EQUAL_UINT32(0, id);
+    TEST_ASSERT_EQUAL(2, int(d.entries.size()));
+    TEST_ASSERT_EQUAL_UINT32(next, d.next_id);
+    // Existing entry: old version back in its slot.
+    id = b;
+    TEST_ASSERT_FALSE(put_entry(d, make_entry("b2", "pw-b2"), id, [] { return false; }));
+    TEST_ASSERT_EQUAL_UINT32(b, d.entries[1].id);
+    TEST_ASSERT_EQUAL_STRING("b", d.entries[1].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("pw-b", d.entries[1].get_or(kFieldPassword).c_str());
+    // While persisting, memory already holds the change.
+    bool seen = false;
+    TEST_ASSERT_TRUE(put_entry(d, make_entry("b3", "pw-b3"), id, [&] {
+        seen = d.find(b)->title == "b3";
+        return true;
+    }));
+    TEST_ASSERT_TRUE(seen);
+}
+
+void test_delete_entry_persists_and_removes() {
+    VaultData d;
+    uint32_t a = d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    int calls = 0;
+    TEST_ASSERT_TRUE(delete_entry(d, a, [&] {
+        calls++;
+        TEST_ASSERT_NULL(d.find(a));  // already gone when persisting
+        return true;
+    }));
+    TEST_ASSERT_EQUAL(1, calls);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
+    TEST_ASSERT_NOT_NULL(d.find(b));
+}
+
+void test_delete_entry_rolls_back_when_save_fails() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    d.add(make_entry("c", "pw-c"));
+    uint32_t next = d.next_id;
+    TEST_ASSERT_FALSE(delete_entry(d, b, [] { return false; }));
+    TEST_ASSERT_EQUAL(3, int(d.entries.size()));
+    // Same position, same contents, same id counter.
+    TEST_ASSERT_EQUAL_UINT32(b, d.entries[1].id);
+    TEST_ASSERT_EQUAL_STRING("b", d.entries[1].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("pw-b", d.entries[1].get_or(kFieldPassword).c_str());
+    TEST_ASSERT_EQUAL_STRING("a", d.entries[0].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("c", d.entries[2].title.c_str());
+    TEST_ASSERT_EQUAL_UINT32(next, d.next_id);
+}
+
+void test_delete_entry_unknown_id_does_not_persist() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    bool persisted = false;
+    TEST_ASSERT_FALSE(delete_entry(d, 999, [&] {
+        persisted = true;
+        return true;
+    }));
+    TEST_ASSERT_FALSE(persisted);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
+}
+
 // ---- Compact -----------------------------------------------------------------
 
 struct FlakyStore : MemoryStore {
@@ -819,6 +1004,11 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_router_ops_are_deferred_until_apply);
     RUN_TEST(test_router_push_pop_replace_reset);
+    RUN_TEST(test_router_apply_reports_navigation);
+    RUN_TEST(test_keystream_press_and_repeat);
+    RUN_TEST(test_keystream_enter_never_repeats);
+    RUN_TEST(test_keystream_held_key_stops_after_screen_change);
+    RUN_TEST(test_keystream_drop_discards_queued_roll);
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
@@ -858,6 +1048,11 @@ int main() {
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
     RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
+    RUN_TEST(test_put_entry_adds_and_replaces);
+    RUN_TEST(test_put_entry_rolls_back_when_save_fails);
+    RUN_TEST(test_delete_entry_persists_and_removes);
+    RUN_TEST(test_delete_entry_rolls_back_when_save_fails);
+    RUN_TEST(test_delete_entry_unknown_id_does_not_persist);
     RUN_TEST(test_compact_rewrites_current_vault_and_keeps_counter);
     RUN_TEST(test_compact_needs_open_session_and_touches_nothing);
     RUN_TEST(test_compact_without_safety_copy_touches_nothing);

@@ -63,6 +63,11 @@ App& app();
 struct InputOpts {
     bool mask = false;
     bool multiline = false;
+    bool non_blank = false;  // refuse an empty or whitespace-only value
+    // Esc asks before dropping text that differs from what the input started
+    // with. Off only for prompts whose text is worthless once dropped
+    // (passphrase prompts, typing ERASE).
+    bool confirm_discard = true;
     bool strength = false;   // show a passphrase strength meter
     size_t min_len = 0;
     size_t max_len = 4000;

@@ -177,6 +177,34 @@ void test_time_parse_format() {
     TEST_ASSERT_FALSE(parse_utc("garbage", t));
 }
 
+void test_time_parse_is_strict() {
+    uint32_t t = 0;
+    // Trailing text, signs, padding and short fields are all refused.
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 12:00xyz", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 12:00:00 ", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 12:00:", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 12:00:5", t));
+    TEST_ASSERT_FALSE(parse_utc("+2026-01-01 12:00", t));
+    TEST_ASSERT_FALSE(parse_utc(" 2026-01-01 12:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-1-01 12:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01  12:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01T12:00", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 -1:00", t));
+    TEST_ASSERT_FALSE(parse_utc("", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01", t));
+    // Both documented forms still work.
+    TEST_ASSERT_TRUE(parse_utc("2026-01-01 12:00", t));
+    TEST_ASSERT_TRUE(parse_utc("2026-01-01 12:00:59", t));
+    TEST_ASSERT_FALSE(parse_utc("2026-01-01 12:00:60", t));
+    // The year limit keeps the result inside uint32_t.
+    TEST_ASSERT_FALSE(parse_utc("2106-01-01 00:00", t));
+    // The clock floor is exactly 2025-01-01 00:00:00 UTC.
+    TEST_ASSERT_TRUE(parse_utc("2025-01-01 00:00:00", t));
+    TEST_ASSERT_EQUAL_UINT32(kClockFloor, t);
+    TEST_ASSERT_TRUE(parse_utc("2024-12-31 23:59:59", t));
+    TEST_ASSERT_EQUAL_UINT32(kClockFloor - 1, t);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_bip39_official_vectors);
@@ -189,5 +217,6 @@ int main() {
     RUN_TEST(test_pwgen_password);
     RUN_TEST(test_pwgen_words_and_strength);
     RUN_TEST(test_time_parse_format);
+    RUN_TEST(test_time_parse_is_strict);
     return UNITY_END();
 }

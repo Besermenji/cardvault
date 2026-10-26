@@ -133,6 +133,12 @@ void handle(ui::App& a, const std::string& line) {
         bool on = sp2 != std::string::npos && arg.substr(sp2 + 1) == "1";
         ui::set_held_override(c == "space" ? ' ' : c[0], on);
         reply("");
+    } else if (cmd == "press") {
+        // press <char> <0|1>: hold/release a simulated physical key
+        auto sp2 = arg.find(' ');
+        bool on = sp2 != std::string::npos && arg.substr(sp2 + 1) == "1";
+        ui::set_sim_pressed(on && !arg.empty() ? arg[0] : 0);
+        reply("");
     } else if (cmd == "g0") {
         g_g0 = true;
         reply("");

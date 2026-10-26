@@ -1,5 +1,6 @@
 #include "features/timeutil.h"
 
+#include <cstdint>
 #include <cstdio>
 
 namespace cv {
@@ -16,16 +17,47 @@ int64_t days_from_civil(int y, unsigned m, unsigned d) {
 
 static bool leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
+namespace {
+
+// Reads exactly `n` ASCII digits at s[pos..pos+n).
+bool digits(const char* s, size_t& pos, int n, int& out) {
+    int v = 0;
+    for (int i = 0; i < n; i++) {
+        char c = s[pos + i];
+        if (c < '0' || c > '9') return false;
+        v = v * 10 + (c - '0');
+    }
+    pos += size_t(n);
+    out = v;
+    return true;
+}
+
+bool expect(const char* s, size_t& pos, char c) {
+    if (s[pos] != c) return false;
+    pos++;
+    return true;
+}
+
+}  // namespace
+
 bool parse_utc(const char* s, uint32_t& out) {
     int y, mo, d, h, mi, sec = 0;
-    char tail;
-    int n = sscanf(s, "%d-%d-%d %d:%d:%d%c", &y, &mo, &d, &h, &mi, &sec, &tail);
-    if (n != 5 && n != 6) return false;
+    size_t pos = 0;
+    if (!digits(s, pos, 4, y) || !expect(s, pos, '-') || !digits(s, pos, 2, mo) ||
+        !expect(s, pos, '-') || !digits(s, pos, 2, d) || !expect(s, pos, ' ') ||
+        !digits(s, pos, 2, h) || !expect(s, pos, ':') || !digits(s, pos, 2, mi))
+        return false;
+    if (s[pos] == ':') {
+        pos++;
+        if (!digits(s, pos, 2, sec)) return false;
+    }
+    if (s[pos] != '\0') return false;
     static const int mdays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     if (y < 1970 || y > 2105 || mo < 1 || mo > 12 || d < 1) return false;
     int dim = mdays[mo - 1] + (mo == 2 && leap(y) ? 1 : 0);
-    if (d > dim || h < 0 || h > 23 || mi < 0 || mi > 59 || sec < 0 || sec > 59) return false;
+    if (d > dim || h > 23 || mi > 59 || sec > 59) return false;
     int64_t t = days_from_civil(y, unsigned(mo), unsigned(d)) * 86400 + h * 3600 + mi * 60 + sec;
+    if (t > int64_t(UINT32_MAX)) return false;
     out = uint32_t(t);
     return true;
 }
