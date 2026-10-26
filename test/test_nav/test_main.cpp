@@ -464,21 +464,31 @@ struct FlakyStore : MemoryStore {
 
 void test_compact_rewrites_current_vault_and_keeps_counter() {
     Fixture f;
-    f.guard.begin_attempt();
     TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
                       int(unlock_attempt(f.guard, f.session, f.store, "right horse battery").kind));
     f.guard.begin_attempt();
     f.guard.begin_attempt();
-    std::vector<uint8_t> before;
+    std::vector<uint8_t> before, copied;
     f.store.read(before);
-    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(f.session, f.store)));
+    bool missing = false;
+    auto copy = [&copied](const std::vector<uint8_t>& img) {
+        copied = img;
+        return true;
+    };
+    TEST_ASSERT_EQUAL(int(CompactResult::Done),
+                      int(compact_vault(f.session, f.store, copy, missing)));
+    TEST_ASSERT_FALSE(missing);
     std::vector<uint8_t> after;
     f.store.read(after);
     TEST_ASSERT_TRUE(before != after);  // fresh nonce
+    TEST_ASSERT_TRUE(copied == after);  // the safety copy is the exact image written
     TEST_ASSERT_EQUAL(2, f.guard.failures());
     f.session.close();
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(f.session.unlock(f.store, "right horse battery")));
     TEST_ASSERT_EQUAL(1, f.session.data().entries.size());
+    // The safety copy restores with the vault passphrase.
+    VaultSession from_copy;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(from_copy.unlock_bytes(copied, "right horse battery")));
 }
 
 void test_compact_needs_open_session_and_touches_nothing() {
@@ -486,9 +496,24 @@ void test_compact_needs_open_session_and_touches_nothing() {
     std::vector<uint8_t> before = f.store.blob;
     FlakyStore s;
     s.write(before);
-    TEST_ASSERT_EQUAL(int(CompactResult::NotOpen), int(compact_vault(f.session, s)));
+    bool missing = false;
+    TEST_ASSERT_EQUAL(int(CompactResult::NotOpen), int(compact_vault(f.session, s, {}, missing)));
     TEST_ASSERT_EQUAL(0, s.erases);
     TEST_ASSERT_TRUE(s.blob == before);
+}
+
+void test_compact_without_safety_copy_touches_nothing() {
+    Fixture f;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(f.session.unlock(f.store, "right horse battery")));
+    FlakyStore s;
+    s.write(f.store.blob);
+    bool missing = false;
+    auto no_card = [](const std::vector<uint8_t>&) { return false; };
+    TEST_ASSERT_EQUAL(int(CompactResult::NoSafetyCopy),
+                      int(compact_vault(f.session, s, no_card, missing)));
+    TEST_ASSERT_EQUAL(0, s.erases);
+    TEST_ASSERT_FALSE(missing);
+    TEST_ASSERT_TRUE(s.blob == f.store.blob);
 }
 
 void test_compact_storage_failures_keep_session_open() {
@@ -499,14 +524,34 @@ void test_compact_storage_failures_keep_session_open() {
         s.write(f.store.blob);
         s.fail_erase = mode == 0;
         s.fail_write = mode == 1;
-        TEST_ASSERT_EQUAL(int(CompactResult::StorageFailed), int(compact_vault(f.session, s)));
+        bool missing = false;
+        TEST_ASSERT_EQUAL(int(CompactResult::StorageFailed),
+                          int(compact_vault(f.session, s, {}, missing)));
         TEST_ASSERT_TRUE(f.session.is_open());
-        // Retry once storage works again: the vault is back.
+        TEST_ASSERT_TRUE(missing);
+        // Locking must not drop the only copy while writes still fail. (A
+        // failed erase with working writes is already recovered by the save.)
+        if (mode == 1) {
+            TEST_ASSERT_FALSE(persist_before_lock(f.session, s, missing));
+            TEST_ASSERT_TRUE(missing);
+            TEST_ASSERT_TRUE(f.session.is_open());
+        }
+        // Once storage works again, locking saves the vault first.
         s.fail_erase = s.fail_write = false;
-        TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(f.session, s)));
+        TEST_ASSERT_TRUE(persist_before_lock(f.session, s, missing));
+        TEST_ASSERT_FALSE(missing);
         VaultSession check;
         TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check.unlock(s, "right horse battery")));
     }
+}
+
+void test_persist_before_lock_is_a_no_op_normally() {
+    Fixture f;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(f.session.unlock(f.store, "right horse battery")));
+    FlakyStore s;
+    s.fail_write = true;  // would fail if it tried to save
+    bool missing = false;
+    TEST_ASSERT_TRUE(persist_before_lock(f.session, s, missing));
 }
 
 void test_restore_wrong_passphrase_counts_while_locked() {
@@ -815,7 +860,9 @@ int main() {
     RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
     RUN_TEST(test_compact_rewrites_current_vault_and_keeps_counter);
     RUN_TEST(test_compact_needs_open_session_and_touches_nothing);
+    RUN_TEST(test_compact_without_safety_copy_touches_nothing);
     RUN_TEST(test_compact_storage_failures_keep_session_open);
+    RUN_TEST(test_persist_before_lock_is_a_no_op_normally);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
     return UNITY_END();

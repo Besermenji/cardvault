@@ -1,6 +1,7 @@
 // Seed-word entry, text layout/cursor and entry save rules.
 #include <unity.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
@@ -412,7 +413,8 @@ void test_dialog_messages_fit_the_screen() {
                           msg::kWipeNotArmed, msg::kWipeRemount, msg::kGuardUnavailable,
                           msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged,
                           msg::kCompactConfirm, msg::kCompactDone, msg::kCompactFailed,
-                          msg::kCompactAfterPass, msg::kSdStalled}) {
+                          msg::kCompactAfterPass, msg::kSdStalled,
+                          msg::kCompactNeedsSd, msg::kCompactAfterRestore}) {
         TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
                                      msg::kDialogMaxLines,
                                  m);
@@ -422,6 +424,13 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kGuardUnavailableTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kSdStalledTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kCompactAfterRestoreTitle) <= 20);
+    // The longest backup name the numbering produces still fits.
+    char done[160];
+    snprintf(done, sizeof done, msg::kCompactDoneWithCopy, "backup-99999999.cvb");
+    TEST_ASSERT_TRUE_MESSAGE(int(wrap(done, strlen(done), msg::kDialogCols).size()) <=
+                                 msg::kDialogMaxLines,
+                             done);
     TEST_ASSERT_TRUE(strlen(msg::kCompactFailedTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }

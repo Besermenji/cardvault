@@ -153,6 +153,58 @@ void test_truncated_tmp_is_deleted_not_promoted() {
     TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
 }
 
+void test_rename_fallback_leftovers_are_recovered() {
+    // Crash inside write()'s fallback: vault.bin moved to vault.bak, the new
+    // version still in vault.tmp. The newer complete image wins.
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto old_img = sealed_image("old passphrase"), new_img = sealed_image("new passphrase");
+    put_raw("/vault.bak", old_img);
+    put_raw("/vault.tmp", new_img);
+    LittleFS.end();
+    {
+        FlashStore after;
+        TEST_ASSERT_TRUE(after.begin());
+        std::vector<uint8_t> out;
+        TEST_ASSERT_TRUE(after.read(out));
+        TEST_ASSERT_TRUE(out == new_img);
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    }
+    // Only the old copy survived (tmp truncated): it is promoted.
+    erase_vault_partition();
+    TEST_ASSERT_TRUE(s.begin());
+    put_raw("/vault.bak", old_img);
+    std::vector<uint8_t> partial(new_img.begin(), new_img.begin() + new_img.size() / 2);
+    put_raw("/vault.tmp", partial);
+    LittleFS.end();
+    {
+        FlashStore after;
+        TEST_ASSERT_TRUE(after.begin());
+        std::vector<uint8_t> out;
+        TEST_ASSERT_TRUE(after.read(out));
+        TEST_ASSERT_TRUE(out == old_img);
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    }
+}
+
+void test_leftover_bak_next_to_vault_is_removed() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto img = sealed_image();
+    TEST_ASSERT_TRUE(s.write(img));
+    put_raw("/vault.bak", sealed_image("old passphrase"));
+    LittleFS.end();
+    FlashStore after;
+    TEST_ASSERT_TRUE(after.begin());
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    std::vector<uint8_t> out;
+    TEST_ASSERT_TRUE(after.read(out) && out == img);
+}
+
 void test_oversize_vault_is_refused_before_allocating() {
     erase_vault_partition();
     FlashStore s;
@@ -225,7 +277,8 @@ void test_compact_removes_stale_old_header() {
              unsigned(count_in_partition(old_salt, kSaltSize)));
     TEST_MESSAGE(msg);
 
-    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(v, s)));
+    bool missing = false;
+    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(v, s, {}, missing)));
     TEST_ASSERT_EQUAL(0, count_in_partition(old_salt, kSaltSize));
     TEST_ASSERT_EQUAL(1, count_in_partition(new_salt, kSaltSize));
     // The vault still opens with the new passphrase only.
@@ -451,6 +504,8 @@ void setup() {
         RUN_TEST(test_persists_across_remount);
         RUN_TEST(test_crash_before_rename_is_recovered);
         RUN_TEST(test_truncated_tmp_is_deleted_not_promoted);
+        RUN_TEST(test_rename_fallback_leftovers_are_recovered);
+        RUN_TEST(test_leftover_bak_next_to_vault_is_removed);
         RUN_TEST(test_oversize_vault_is_refused_before_allocating);
         RUN_TEST(test_stale_tmp_does_not_replace_good_vault);
         RUN_TEST(test_compact_removes_stale_old_header);

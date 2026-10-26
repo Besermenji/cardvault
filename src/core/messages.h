@@ -36,12 +36,19 @@ constexpr const char* kPayloadDamaged =
 
 constexpr const char* kCompactTitle = "Compact vault";
 constexpr const char* kCompactConfirm =
-    "Erases old encrypted copies left in flash, then rewrites your vault. Do not power off. "
-    "Make an SD backup first. Y to start.";
+    "Saves a safety copy to SD, erases old encrypted copies in flash, then rewrites your "
+    "vault. Keep the power on. Y to start.";
 constexpr const char* kCompactDone = "Old copies are gone. Only the current vault is in flash.";
+// %s = backup file name
+constexpr const char* kCompactDoneWithCopy =
+    "Old copies are gone. Safety copy on SD: %s (opens with your vault passphrase).";
+constexpr const char* kCompactNeedsSd =
+    "Compact first saves a safety copy to SD. Insert a FAT32 microSD card and try again. "
+    "Nothing was changed.";
 constexpr const char* kCompactFailedTitle = "Compact failed";
 constexpr const char* kCompactFailed =
-    "Your vault is only in memory now. Do not lock or power off. Y to retry, or back up to SD.";
+    "Your vault is only in memory now and the device will not lock until it is saved. "
+    "Y to retry. The SD safety copy can restore it.";
 constexpr const char* kCompactAfterPassTitle = "Passphrase changed";
 constexpr const char* kCompactAfterPass =
     "Flash still holds old copies that open with the OLD passphrase. Compact now? "
@@ -49,7 +56,13 @@ constexpr const char* kCompactAfterPass =
 
 constexpr const char* kSdStalledTitle = "SD card not readable";
 constexpr const char* kSdStalled =
-    "The card did not respond. Remove it and restart the device to use SD again.";
+    "The card did not respond in time. Try again; if it keeps failing, use another card or "
+    "restart the device.";
+
+constexpr const char* kCompactAfterRestoreTitle = "Restored";
+constexpr const char* kCompactAfterRestore =
+    "Flash still holds old copies of the replaced vault, which open with its passphrase. "
+    "Compact now?";
 
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;

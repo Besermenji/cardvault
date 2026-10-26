@@ -17,9 +17,14 @@ App& app() {
     return instance;
 }
 
-void App::lock_now() {
+bool App::lock_now() {
     lock_pending = false;
+    if (!persist_before_lock(session, store, flash_missing)) {
+        toast("Not locked: vault is only in memory", color::bad, 3000);
+        return false;
+    }
     lock_session(router, session, make_unlock());
+    return true;
 }
 
 bool App::save() {
@@ -28,6 +33,7 @@ bool App::save() {
         toast(vault_error_str(e), color::bad, 3000);
         return false;
     }
+    flash_missing = false;
     return true;
 }
 

@@ -77,7 +77,7 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     if (key_ok) *key_ok = true;
 
     SBytes payload;
-    e = open_file(file.data(), file.size(), dek.data(), payload);
+    e = open_body(file.data(), file.size(), dek.data(), payload);  // layout checked above
     if (e != VaultError::Ok) return e;
     e = deserialize(payload.data(), payload.size(), data_);
     if (e != VaultError::Ok) return e;

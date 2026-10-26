@@ -81,6 +81,9 @@ VaultError check_layout(const uint8_t* file, size_t len, Header* out = nullptr);
 
 VaultError seal_file(const Header& h, const uint8_t dek[32], const uint8_t* payload,
                      size_t len, std::vector<uint8_t>& out);
+// check_layout, then open_body.
 VaultError open_file(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload);
+// Decrypts the body of a file that already passed check_layout.
+VaultError open_body(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload);
 
 }  // namespace cv

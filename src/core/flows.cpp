@@ -135,14 +135,25 @@ VaultError restore_commit(AttemptGuard& guard, VaultSession& session, BlobStore&
     return VaultError::Ok;
 }
 
-CompactResult compact_vault(const VaultSession& session, BlobStore& store) {
+CompactResult compact_vault(const VaultSession& session, BlobStore& store,
+                            const SafetyCopy& safety_copy, bool& flash_missing) {
     if (!session.is_open()) return CompactResult::NotOpen;
     std::vector<uint8_t> image;
     if (session.seal(image) != VaultError::Ok) return CompactResult::SealFailed;
+    if (safety_copy && !safety_copy(image)) return CompactResult::NoSafetyCopy;
+    flash_missing = true;  // from the erase on, only the session holds the vault
     if (!store.erase() || !store.write(image)) return CompactResult::StorageFailed;
     std::vector<uint8_t> check;
     if (!store.read(check) || check != image) return CompactResult::StorageFailed;
+    flash_missing = false;
     return CompactResult::Done;
+}
+
+bool persist_before_lock(VaultSession& session, BlobStore& store, bool& flash_missing) {
+    if (!flash_missing || !session.is_open()) return true;
+    if (session.save(store) != VaultError::Ok) return false;
+    flash_missing = false;
+    return true;
 }
 
 void lock_session(ui::Router& router, VaultSession& session, ui::ScreenPtr unlock_screen) {

@@ -30,7 +30,11 @@ struct App {
     // so a screen is never destroyed while its own handler is running.
     void lock() { lock_pending = true; }
     // Destroys all screens, wipes decrypted data and keys, shows Unlock.
-    void lock_now();
+    // Refuses (returns false, with a toast) while the session is the only copy
+    // of the vault and saving it again fails: see persist_before_lock.
+    bool lock_now();
+    // Set when a compact erased flash but could not write the vault back.
+    bool flash_missing = false;
     bool lock_pending = false;
     // Re-encrypts and writes the vault; shows a toast on failure.
     bool save();

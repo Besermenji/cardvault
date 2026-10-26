@@ -49,8 +49,10 @@ void handle_autolock(App& a, uint32_t now) {
         case AutolockAction::Lock:
             a.dimmed = false;
             a.apply_brightness();
-            a.lock_now();
-            a.toast("Locked (idle)", color::accent);
+            if (a.lock_now())
+                a.toast("Locked (idle)", color::accent);
+            else
+                a.last_input_ms = now;  // retry after another idle period
             break;
     }
 }
@@ -143,10 +145,7 @@ void loop() {
     bool g0 = M5Cardputer.BtnA.wasPressed();
 #endif
     // G0 side button: instant lock.
-    if (g0 && a.session.is_open()) {
-        a.lock_now();
-        a.toast("Locked", color::accent);
-    }
+    if (g0 && a.session.is_open() && a.lock_now()) a.toast("Locked", color::accent);
 
     Key k;
     while (poll_key(k)) {

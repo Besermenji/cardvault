@@ -129,7 +129,10 @@ VaultError check_layout(const uint8_t* file, size_t len, Header* out) {
 
 VaultError open_file(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload) {
     VaultError e = check_layout(file, len);
-    if (e != VaultError::Ok) return e;
+    return e == VaultError::Ok ? open_body(file, len, dek, payload) : e;
+}
+
+VaultError open_body(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload) {
     size_t overhead = kHeaderSize + kNonceSize + kMacSize;
     size_t ct_len = len - overhead;
 

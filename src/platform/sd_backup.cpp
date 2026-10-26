@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 
 #include <algorithm>
+#include <atomic>
 
 #include "core/backup_names.h"
 #include "vault/format.h"
@@ -16,45 +17,53 @@ namespace sd {
 namespace {
 constexpr int kSck = 40, kMiso = 39, kMosi = 14, kCs = 12;
 constexpr uint32_t kSpiHz = 25000000;
-constexpr uint32_t kMountTimeoutMs = 3000;
+constexpr uint32_t kMountTimeoutMs = 5000;
 const char* kDir = "/cardvault";
 bool g_mounted = false;
-bool g_wedged = false;
 
-// SD.begin runs in its own task so a stalled card cannot freeze the UI. The
-// state is static: a task that never returns must not touch freed memory.
-struct MountJob {
-    volatile bool done;
-    volatile bool ok;
-};
-MountJob g_job;
+// SD.begin runs in its own task so a stalled card cannot freeze the UI.
+// State is static and atomic: the task may outlive the call that started it.
+enum JobState : int { kIdle, kRunning, kDone, kAbandoned };
+std::atomic<int> g_job{kIdle};
+std::atomic<bool> g_job_ok{false};
 
 void mount_task(void*) {
     // Same wiring as M5's Cardputer SD example: the default SPI bus.
     SPI.begin(kSck, kMiso, kMosi, kCs);
-    g_job.ok = SD.begin(kCs, SPI, kSpiHz);
-    g_job.done = true;
+    bool ok = SD.begin(kCs, SPI, kSpiHz);
+    g_job_ok = ok;
+    int expected = kRunning;
+    if (!g_job.compare_exchange_strong(expected, kDone)) {
+        // The caller gave up waiting: release the card and bus ourselves.
+        if (ok) SD.end();
+        SPI.end();
+        g_job = kIdle;
+    }
     vTaskDelete(nullptr);
 }
 }  // namespace
 
-bool wedged() { return g_wedged; }
+bool wedged() { return g_job == kAbandoned; }
 
 bool mount() {
     if (g_mounted) return true;
-    if (g_wedged) return false;
-    g_job.done = false;
-    g_job.ok = false;
-    if (xTaskCreatePinnedToCore(mount_task, "sd_mount", 6144, nullptr, 1, nullptr, 0) != pdPASS)
+    int idle = kIdle;
+    if (!g_job.compare_exchange_strong(idle, kRunning)) return false;  // stalled mount pending
+    g_job_ok = false;
+    if (xTaskCreatePinnedToCore(mount_task, "sd_mount", 6144, nullptr, 1, nullptr, 0) != pdPASS) {
+        g_job = kIdle;
         return false;
-    for (uint32_t waited = 0; !g_job.done; waited += 10) {
+    }
+    for (uint32_t waited = 0; g_job == kRunning; waited += 10) {
         if (waited >= kMountTimeoutMs) {
-            g_wedged = true;
-            return false;
+            int running = kRunning;
+            if (g_job.compare_exchange_strong(running, kAbandoned)) return false;
+            break;  // finished just now
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    g_mounted = g_job.ok;
+    g_job = kIdle;
+    g_mounted = g_job_ok;
     if (!g_mounted) {
         SPI.end();
         return false;
@@ -98,6 +107,7 @@ bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
     for (int tries = 0;; tries++, number++) {
         if (tries == 100) return false;
         name = backup_name(number);
+        if (backup_number(name) != number) return false;  // past the numbering range
         path = std::string(kDir) + "/" + name;
         if (!SD.exists(path.c_str())) break;
     }
