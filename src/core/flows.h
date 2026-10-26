@@ -134,6 +134,14 @@ CompactResult compact_vault(const VaultSession& session, BlobStore& store,
 // tries to save it again and returns false (do not lock) if that fails.
 bool persist_before_lock(VaultSession& session, BlobStore& store, bool& flash_missing);
 
+// ---- Delete -------------------------------------------------------------------
+
+// Removes the entry and calls `persist` (normally App::save). If persisting
+// fails the entry is put back at its old position, so memory never differs from
+// what flash holds. Returns false when the id is unknown (persist not called)
+// or persisting failed. Every temporary copy of the entry is wiped.
+bool delete_entry(VaultData& data, uint32_t id, const std::function<bool()>& persist);
+
 // ---- Locking ----------------------------------------------------------------
 
 // Destroys every screen (and any secrets they hold), wipes the session and

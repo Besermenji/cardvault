@@ -77,6 +77,22 @@ void test_router_push_pop_replace_reset() {
     TEST_ASSERT_EQUAL(0, r.depth());
 }
 
+void test_router_apply_reports_navigation() {
+    Router r;
+    TEST_ASSERT_FALSE(r.apply());  // nothing queued
+    r.push(fake("a"));
+    TEST_ASSERT_TRUE(r.apply());
+    TEST_ASSERT_FALSE(r.apply());  // already applied
+    r.push(fake("b"));
+    r.pop();
+    TEST_ASSERT_TRUE(r.apply());
+    r.replace(fake("c"));
+    TEST_ASSERT_TRUE(r.apply());
+    r.reset(fake("d"));
+    TEST_ASSERT_TRUE(r.apply());
+    TEST_ASSERT_FALSE(r.apply());
+}
+
 void test_router_resumes_new_top_and_orders_ops() {
     Router r;
     r.push(fake("home"));
@@ -446,6 +462,60 @@ void test_oversize_or_bad_layout_costs_no_attempt() {
     TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
     TEST_ASSERT_EQUAL(int(VaultError::TooLarge), int(c.error));
     TEST_ASSERT_EQUAL(0, f.guard.failures());
+}
+
+// ---- Delete ---------------------------------------------------------------------
+
+static Entry make_entry(const char* title, const char* secret) {
+    Entry e;
+    e.type = EntryType::Password;
+    e.title = title;
+    e.set(kFieldPassword, secret);
+    return e;
+}
+
+void test_delete_entry_persists_and_removes() {
+    VaultData d;
+    uint32_t a = d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    int calls = 0;
+    TEST_ASSERT_TRUE(delete_entry(d, a, [&] {
+        calls++;
+        TEST_ASSERT_NULL(d.find(a));  // already gone when persisting
+        return true;
+    }));
+    TEST_ASSERT_EQUAL(1, calls);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
+    TEST_ASSERT_NOT_NULL(d.find(b));
+}
+
+void test_delete_entry_rolls_back_when_save_fails() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    uint32_t b = d.add(make_entry("b", "pw-b"));
+    d.add(make_entry("c", "pw-c"));
+    uint32_t next = d.next_id;
+    TEST_ASSERT_FALSE(delete_entry(d, b, [] { return false; }));
+    TEST_ASSERT_EQUAL(3, int(d.entries.size()));
+    // Same position, same contents, same id counter.
+    TEST_ASSERT_EQUAL_UINT32(b, d.entries[1].id);
+    TEST_ASSERT_EQUAL_STRING("b", d.entries[1].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("pw-b", d.entries[1].get_or(kFieldPassword).c_str());
+    TEST_ASSERT_EQUAL_STRING("a", d.entries[0].title.c_str());
+    TEST_ASSERT_EQUAL_STRING("c", d.entries[2].title.c_str());
+    TEST_ASSERT_EQUAL_UINT32(next, d.next_id);
+}
+
+void test_delete_entry_unknown_id_does_not_persist() {
+    VaultData d;
+    d.add(make_entry("a", "pw-a"));
+    bool persisted = false;
+    TEST_ASSERT_FALSE(delete_entry(d, 999, [&] {
+        persisted = true;
+        return true;
+    }));
+    TEST_ASSERT_FALSE(persisted);
+    TEST_ASSERT_EQUAL(1, int(d.entries.size()));
 }
 
 // ---- Compact -----------------------------------------------------------------
@@ -819,6 +889,7 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_router_ops_are_deferred_until_apply);
     RUN_TEST(test_router_push_pop_replace_reset);
+    RUN_TEST(test_router_apply_reports_navigation);
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
@@ -858,6 +929,9 @@ int main() {
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
     RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
+    RUN_TEST(test_delete_entry_persists_and_removes);
+    RUN_TEST(test_delete_entry_rolls_back_when_save_fails);
+    RUN_TEST(test_delete_entry_unknown_id_does_not_persist);
     RUN_TEST(test_compact_rewrites_current_vault_and_keeps_counter);
     RUN_TEST(test_compact_needs_open_session_and_touches_nothing);
     RUN_TEST(test_compact_without_safety_copy_touches_nothing);

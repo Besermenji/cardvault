@@ -170,4 +170,21 @@ AutolockAction autolock_step(bool unlocked, bool dimmed, uint32_t idle_ms, uint3
     return AutolockAction::None;
 }
 
+bool delete_entry(VaultData& data, uint32_t id, const std::function<bool()>& persist) {
+    size_t index = 0;
+    while (index < data.entries.size() && data.entries[index].id != id) index++;
+    if (index == data.entries.size()) return false;
+
+    Entry backup = data.entries[index];
+    data.remove(id);
+    bool saved = persist && persist();
+    if (!saved) {
+        // Not on flash: undo, keeping order, id and the id counter.
+        data.entries.insert(data.entries.begin() + long(index), std::move(backup));
+        return false;
+    }
+    backup.clear();
+    return true;
+}
+
 }  // namespace cv
