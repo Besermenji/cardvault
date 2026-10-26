@@ -746,7 +746,9 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("message", "Restore failed", timeout=30)
     check(st["fails"] == 0, f"unlocked restore guess must not count: {st}")
     d.key("enter")
-    d.screen("menu", "Choose backup")
+    d.screen("settings")  # picking a backup closed the list
+    d.key("enter")  # Restore from SD again (row still selected)
+    d.screen("menu", "Choose backup", timeout=15)
     d.key("enter")
     d.screen("text_input", "Backup passphrase")
     d.type(P3)
@@ -801,7 +803,7 @@ def t21_sd_compact_with_safety_copy(d):
     d.key("enter")
     d.screen("confirm", "Replace vault?", timeout=30)
     d.key("n")  # verified; no need to replace
-    d.screen("menu", "Choose backup")
+    d.screen("settings")
     go_home(d)
 
 
