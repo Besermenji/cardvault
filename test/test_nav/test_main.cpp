@@ -1,11 +1,14 @@
 // Navigation (router + routing decisions) and security flows.
 #include <unity.h>
 
+#include <cstring>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "core/flows.h"
+#include "crypto/kdf.h"
+#include "vault/serializer.h"
 
 using namespace cv;
 using namespace cv::ui;
@@ -187,7 +190,7 @@ void test_wipe_failure_keeps_counter_exhausted() {
     TEST_ASSERT_TRUE(s.exists());
     TEST_ASSERT_TRUE(g.exhausted());
     // The next boot retries the wipe, even if the partition is unmountable.
-    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, g.exhausted(), true)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, false, g.exhausted(), true)));
 }
 
 void test_wipe_reports_counter_that_could_not_be_reset() {
@@ -246,17 +249,27 @@ void test_wipe_armed_by_earlier_failures_even_if_mark_fails() {
 
 // ---- Boot route -------------------------------------------------------------
 
+void test_boot_route_without_counter_storage_blocks_everything() {
+    // No working counter: every attempt would be unguarded, whatever else is true.
+    for (int mounted = 0; mounted < 2; mounted++)
+        for (int exhausted = 0; exhausted < 2; exhausted++)
+            for (int vault = 0; vault < 2; vault++)
+                TEST_ASSERT_EQUAL(int(BootRoute::GuardUnavailable),
+                                  int(boot_route(true, false, mounted, exhausted, vault)));
+    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, false, true, true, true)));
+}
+
 void test_boot_route() {
-    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, false, false, false)));
-    TEST_ASSERT_EQUAL(int(BootRoute::StorageUnreadable), int(boot_route(true, false, false, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, true, false, false, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::StorageUnreadable), int(boot_route(true, true, false, false, false)));
     // An exhausted counter beats an unmountable partition: finish the wipe.
-    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, true, true)));
-    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, true, false)));
-    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, false, true, false)));
-    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, true)));
-    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, false)));
-    TEST_ASSERT_EQUAL(int(BootRoute::Unlock), int(boot_route(true, true, false, true)));
-    TEST_ASSERT_EQUAL(int(BootRoute::Setup), int(boot_route(true, true, false, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, false, true, true)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, false, true, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, true, false, true, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, true, true)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, true, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Unlock), int(boot_route(true, true, true, false, true)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Setup), int(boot_route(true, true, true, false, false)));
 }
 
 // ---- Unlock -----------------------------------------------------------------
@@ -269,6 +282,7 @@ struct Fixture {
     AttemptGuard guard{kv};
     VaultSession session;
     Fixture() {
+        guard.reset();  // setup writes a real 0; a missing counter would read as 5
         session.create(store, "right horse battery", kFast);
         Entry e;
         e.type = EntryType::Note;
@@ -475,6 +489,101 @@ void test_restore_corrupt_image_refunds() {
     TEST_ASSERT_EQUAL(0, f.guard.failures());
 }
 
+// Vault whose passphrase is right but whose payload is not readable.
+static std::vector<uint8_t> make_vault_with_bad_payload(const char* pass, uint8_t version_xor) {
+    Header h;
+    h.kdf = kFast;
+    header_new_salt(h);
+    Key32 kek;
+    kdf_derive(kek.data(), reinterpret_cast<const uint8_t*>(pass), strlen(pass), h.salt, h.kdf);
+    uint8_t dek[32];
+    for (int i = 0; i < 32; i++) dek[i] = uint8_t(i + 1);
+    header_wrap(h, kek.data(), dek);
+    SBytes payload;
+    serialize(VaultData(), payload);
+    payload[0] ^= version_xor;
+    std::vector<uint8_t> out;
+    seal_file(h, dek, payload.data(), payload.size(), out);
+    return out;
+}
+
+void test_unlock_payload_version_error_counts_as_correct_passphrase() {
+    Fixture f;
+    f.guard.begin_attempt();
+    f.guard.begin_attempt();
+    f.store.write(make_vault_with_bad_payload("right horse battery", 0x7f));
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "right horse battery");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Damaged), int(r.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::UnsupportedVersion), int(r.error));
+    TEST_ASSERT_FALSE(f.session.is_open());
+    TEST_ASSERT_EQUAL(0, f.guard.failures());  // success, not a refund of one attempt
+    // A wrong passphrase on the same vault still counts.
+    r = unlock_attempt(f.guard, f.session, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Wrong), int(r.kind));
+    TEST_ASSERT_EQUAL(1, f.guard.failures());
+}
+
+void test_unlock_unreadable_header_costs_nothing() {
+    Fixture f;
+    f.store.blob[0] = 'X';  // bad magic: rejected before any KDF runs
+    for (int i = 0; i < 12; i++) {
+        UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
+        TEST_ASSERT_EQUAL(int(UnlockResult::Damaged), int(r.kind));
+        TEST_ASSERT_EQUAL(int(VaultError::BadMagic), int(r.error));
+    }
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    f.store.blob.resize(10);
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(r.error));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+}
+
+void test_unlock_io_error_never_touches_counter() {
+    Fixture f;
+    f.kv.fail_writes = true;  // would be Refused if the attempt were begun
+    f.store.erase();
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "right horse battery");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Failed), int(r.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::Io), int(r.error));
+}
+
+void test_unlock_with_counter_missing_starts_at_five_failures() {
+    Fixture f;
+    f.kv.values.clear();  // NVS wiped while the vault stayed
+    TEST_ASSERT_EQUAL(int(kFailuresIfMissing), int(f.guard.failures()));
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Wrong), int(r.kind));
+    TEST_ASSERT_EQUAL(kFailuresIfMissing + 1, f.guard.failures());
+    for (int i = 0; i < 3; i++) unlock_attempt(f.guard, f.session, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe),
+                      int(unlock_attempt(f.guard, f.session, f.store, "guess").kind));
+    // One right answer restores a real counter.
+    f.kv.values.clear();
+    TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
+                      int(unlock_attempt(f.guard, f.session, f.store, "right horse battery").kind));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    TEST_ASSERT_TRUE(f.kv.values.count("fails"));
+}
+
+void test_restore_unreadable_image_costs_nothing_even_when_locked() {
+    Fixture f;
+    f.kv.fail_writes = true;  // would be Refused if an attempt were begun
+    auto backup = make_backup("backup pass", 1);
+    backup.resize(8);
+    RestoreCheck c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::Truncated), int(c.error));
+}
+
+void test_restore_backup_with_broken_payload_refunds() {
+    Fixture f;
+    auto backup = make_vault_with_bad_payload("backup pass", 0x7f);
+    RestoreCheck c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Failed), int(c.kind));
+    TEST_ASSERT_EQUAL(int(VaultError::UnsupportedVersion), int(c.error));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());  // says nothing about the device passphrase
+}
+
 void test_restore_commit_replaces_vault_and_resets_counter() {
     Fixture f;
     for (int i = 0; i < 5; i++) unlock_attempt(f.guard, f.session, f.store, "guess");
@@ -507,8 +616,9 @@ void test_restore_commit_io_error_keeps_counter() {
 void test_unlock_leaves_counter_when_reset_fails() {
     Fixture f;
     FlakyKv kv;
-    kv.writes_left = 1;  // begin_attempt persists, record_success fails
     AttemptGuard g(kv);
+    g.reset();
+    kv.writes_left = 1;  // begin_attempt persists, record_success fails
     TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
                       int(unlock_attempt(g, f.session, f.store, "right horse battery").kind));
     // Fails closed: the attempt stays counted, and the UI warns about it.
@@ -563,6 +673,7 @@ int main() {
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
     RUN_TEST(test_boot_route);
+    RUN_TEST(test_boot_route_without_counter_storage_blocks_everything);
     RUN_TEST(test_wipe_success_clears_vault_and_counter);
     RUN_TEST(test_wipe_failure_keeps_counter_exhausted);
     RUN_TEST(test_wipe_reports_counter_that_could_not_be_reset);
@@ -585,6 +696,12 @@ int main() {
     RUN_TEST(test_restore_wrong_while_locked_reports_delay);
     RUN_TEST(test_restore_while_unlocked_does_not_count);
     RUN_TEST(test_restore_corrupt_image_refunds);
+    RUN_TEST(test_unlock_payload_version_error_counts_as_correct_passphrase);
+    RUN_TEST(test_unlock_unreadable_header_costs_nothing);
+    RUN_TEST(test_unlock_io_error_never_touches_counter);
+    RUN_TEST(test_unlock_with_counter_missing_starts_at_five_failures);
+    RUN_TEST(test_restore_unreadable_image_costs_nothing_even_when_locked);
+    RUN_TEST(test_restore_backup_with_broken_payload_refunds);
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);

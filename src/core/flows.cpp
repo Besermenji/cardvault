@@ -1,9 +1,13 @@
 #include "core/flows.h"
 
+#include "core/messages.h"
+
 namespace cv {
 
-BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, bool vault_exists) {
+BootRoute boot_route(bool has_partition, bool guard_ok, bool mounted, bool guard_exhausted,
+                     bool vault_exists) {
     if (!has_partition) return BootRoute::NoPartition;
+    if (!guard_ok) return BootRoute::GuardUnavailable;
     if (guard_exhausted) return BootRoute::Wipe;
     if (!mounted) return BootRoute::StorageUnreadable;
     return vault_exists ? BootRoute::Unlock : BootRoute::Setup;
@@ -18,6 +22,23 @@ WipeResult wipe_vault(BlobStore& store, AttemptGuard& guard) {
     return r;
 }
 
+namespace {
+
+// Only these say nothing about the passphrase, so only these give the attempt
+// back. Every other error after the KDF ran stays counted: a new error path
+// must never become a free guess.
+bool refundable(VaultError e) { return e == VaultError::OutOfMemory || e == VaultError::Io; }
+
+}  // namespace
+
+const char* damaged_text(VaultError error) {
+    switch (error) {
+        case VaultError::Corrupt: return msg::kPayloadDamaged;
+        case VaultError::UnsupportedVersion: return msg::kVaultNewer;
+        default: return msg::kVaultUnreadable;
+    }
+}
+
 UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStore& store,
                             const SString& pass) {
     UnlockResult r{UnlockResult::Refused};
@@ -29,31 +50,40 @@ UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStor
         r.kind = UnlockResult::Empty;
         return r;
     }
+    // Reading the file and its header needs no passphrase, so a failure here
+    // is not a guess and costs nothing.
+    std::vector<uint8_t> file;
+    if (!store.read(file)) {
+        r.kind = UnlockResult::Failed;
+        r.error = VaultError::Io;
+        return r;
+    }
+    Header hdr;
+    r.error = VaultSession::peek_header(file, hdr);
+    if (r.error != VaultError::Ok) {
+        r.kind = UnlockResult::Damaged;
+        return r;
+    }
     if (!guard.begin_attempt()) return r;  // Refused
-    r.error = session.unlock(store, pass);
-    switch (r.error) {
-        case VaultError::Ok:
-            guard.record_success();
-            r.kind = UnlockResult::Unlocked;
-            break;
-        case VaultError::WrongPassphrase:
-            if (guard.exhausted()) {
-                r.kind = UnlockResult::MustWipe;
-            } else {
-                r.kind = UnlockResult::Wrong;
-                r.retry_delay_ms = guard.required_delay_ms();
-            }
-            break;
-        case VaultError::Corrupt:
-            // The data key unwrapped, so the passphrase was right.
-            guard.record_success();
-            session.close();
-            r.kind = UnlockResult::Damaged;
-            break;
-        default:
-            guard.refund();
-            r.kind = UnlockResult::Failed;
-            break;
+    bool key_ok = false;
+    r.error = session.unlock_bytes(file, pass, &key_ok);
+    if (r.error == VaultError::Ok) {
+        guard.record_success();
+        r.kind = UnlockResult::Unlocked;
+    } else if (key_ok) {
+        // The data key unwrapped, so the passphrase was right; the payload is
+        // what is broken (corrupt, or a version this build cannot read).
+        guard.record_success();
+        session.close();
+        r.kind = UnlockResult::Damaged;
+    } else if (refundable(r.error)) {
+        guard.refund();
+        r.kind = UnlockResult::Failed;
+    } else if (guard.exhausted()) {
+        r.kind = UnlockResult::MustWipe;
+    } else {
+        r.kind = r.error == VaultError::WrongPassphrase ? UnlockResult::Wrong : UnlockResult::Failed;
+        r.retry_delay_ms = guard.required_delay_ms();
     }
     return r;
 }
@@ -69,27 +99,31 @@ RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
         r.kind = RestoreCheck::Empty;
         return r;
     }
-    if (device_locked && !guard.begin_attempt()) return r;  // Refused
-    VaultSession tmp;
-    r.error = tmp.unlock_bytes(image, pass);
-    r.entries = tmp.data().entries.size();
-    tmp.close();
-    if (r.error == VaultError::Ok) {
-        if (device_locked) guard.refund();
-        r.kind = RestoreCheck::Ok;
+    Header hdr;
+    r.error = VaultSession::peek_header(image, hdr);
+    if (r.error != VaultError::Ok) {  // bad image: no KDF, not a guess
+        r.kind = RestoreCheck::Failed;
         return r;
     }
-    if (r.error != VaultError::WrongPassphrase) {
+    if (device_locked && !guard.begin_attempt()) return r;  // Refused
+    VaultSession tmp;
+    bool key_ok = false;
+    r.error = tmp.unlock_bytes(image, pass, &key_ok);
+    r.entries = tmp.data().entries.size();
+    tmp.close();
+    // A correct backup passphrase says nothing about the device passphrase,
+    // and neither do storage or memory errors: those give the attempt back.
+    if (r.error == VaultError::Ok || key_ok || refundable(r.error)) {
         if (device_locked) guard.refund();
-        r.kind = RestoreCheck::Failed;
+        r.kind = r.error == VaultError::Ok ? RestoreCheck::Ok : RestoreCheck::Failed;
         return r;
     }
     if (device_locked && guard.exhausted()) {
         r.kind = RestoreCheck::MustWipe;
-    } else {
-        r.kind = RestoreCheck::Wrong;
-        if (device_locked) r.retry_delay_ms = guard.required_delay_ms();
+        return r;
     }
+    r.kind = r.error == VaultError::WrongPassphrase ? RestoreCheck::Wrong : RestoreCheck::Failed;
+    if (device_locked) r.retry_delay_ms = guard.required_delay_ms();
     return r;
 }
 

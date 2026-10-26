@@ -15,7 +15,7 @@ uint32_t attempt_delay_ms(uint32_t failures) {
 
 uint32_t AttemptGuard::failures() {
     uint32_t v = 0;
-    kv_.get_u32(kKey, v);
+    if (!kv_.get_u32(kKey, v)) return kFailuresIfMissing;
     return v;
 }
 

@@ -17,9 +17,31 @@ void test_delay_schedule() {
     TEST_ASSERT_EQUAL(300000, attempt_delay_ms(100));
 }
 
+void test_missing_counter_fails_closed() {
+    MemoryKv kv;  // nothing stored: NVS erased or never written
+    AttemptGuard g(kv);
+    TEST_ASSERT_EQUAL(kFailuresIfMissing, g.failures());
+    TEST_ASSERT_EQUAL(kMaxAttempts - kFailuresIfMissing, g.remaining());
+    TEST_ASSERT_FALSE(g.exhausted());
+    // The first attempt continues from the penalty, not from zero.
+    TEST_ASSERT_TRUE(g.begin_attempt());
+    TEST_ASSERT_EQUAL(kFailuresIfMissing + 1, g.failures());
+    // Setup / a successful unlock writes a real value.
+    TEST_ASSERT_TRUE(g.reset());
+    TEST_ASSERT_EQUAL(0, g.failures());
+}
+
+void test_missing_counter_cannot_be_refunded_below_penalty() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    g.refund();
+    TEST_ASSERT_EQUAL(kFailuresIfMissing - 1, g.failures());
+}
+
 void test_counts_before_check_and_resets_on_success() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     TEST_ASSERT_EQUAL(0, g.failures());
     TEST_ASSERT_TRUE(g.begin_attempt());
     TEST_ASSERT_EQUAL(1, g.failures());
@@ -34,6 +56,7 @@ void test_counts_before_check_and_resets_on_success() {
 void test_exhaustion_after_ten() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     for (int i = 0; i < 10; i++) TEST_ASSERT_TRUE(g.begin_attempt());
     TEST_ASSERT_TRUE(g.exhausted());
     TEST_ASSERT_EQUAL(0, g.remaining());
@@ -52,6 +75,7 @@ void test_refuses_when_counter_cannot_persist() {
 void test_refund_undoes_one_attempt() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     g.refund();
     TEST_ASSERT_EQUAL(0, g.failures());
     g.begin_attempt();
@@ -88,6 +112,8 @@ void test_gate_waits_until_armed_delay_passes() {
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_delay_schedule);
+    RUN_TEST(test_missing_counter_fails_closed);
+    RUN_TEST(test_missing_counter_cannot_be_refunded_below_penalty);
     RUN_TEST(test_counts_before_check_and_resets_on_success);
     RUN_TEST(test_exhaustion_after_ten);
     RUN_TEST(test_refuses_when_counter_cannot_persist);

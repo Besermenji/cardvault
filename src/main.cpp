@@ -80,16 +80,21 @@ void setup() {
     clear(g_canvas);
     g_canvas.pushSprite(0, 0);
 
-    a.guard_kv.begin();
+    bool guard_ok = a.guard_kv.begin();
     bool has_partition = FlashStore::has_partition();
     bool mounted = has_partition && a.store.begin();
-    switch (boot_route(has_partition, mounted, a.guard.exhausted(), mounted && a.store.exists())) {
+    switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),
+                       mounted && a.store.exists())) {
         case BootRoute::NoPartition:
             a.router.reset(make_message(
                 "No vault partition",
                 "This install has no 'vault' partition. Flash the full CardVault image, or "
                 "install the CardVault .bin with Launcher so its partition table is used.",
                 color::bad));
+            break;
+        case BootRoute::GuardUnavailable:
+            a.router.reset(make_message(msg::kGuardUnavailableTitle, msg::kGuardUnavailable,
+                                        color::bad));
             break;
         case BootRoute::StorageUnreadable:
             // Never format a non-blank partition silently: it may hold a damaged
@@ -110,7 +115,13 @@ void setup() {
             // its contents must go, so no confirmation is asked.
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock: a.router.reset(make_unlock()); break;
-        case BootRoute::Setup: a.router.reset(make_setup()); break;
+        case BootRoute::Setup:
+            // No vault yet: give the counter a real value, so restoring a
+            // backup from the setup screen does not start from the
+            // "counter missing" penalty.
+            a.guard.reset();
+            a.router.reset(make_setup());
+            break;
     }
     a.router.apply();
     a.last_input_ms = millis();

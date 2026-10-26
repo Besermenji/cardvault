@@ -13,6 +13,11 @@
 namespace cv {
 
 constexpr uint32_t kMaxAttempts = 10;
+// Failures assumed when the counter cannot be read (NVS erased or damaged
+// while a vault may still exist). Fails closed: wiping NVS must not hand an
+// attacker a fresh set of attempts. Setup and a successful unlock write a
+// real value.
+constexpr uint32_t kFailuresIfMissing = kMaxAttempts / 2;
 
 // Delay required before the next attempt, given the failures so far.
 uint32_t attempt_delay_ms(uint32_t failures);

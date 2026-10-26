@@ -48,12 +48,13 @@ void change_passphrase_flow() {
                 return;
             }
             case UnlockResult::Damaged:
-                a.toast(vault_error_str(VaultError::Corrupt), color::bad, 2500);
+                a.toast(vault_error_str(r.error), color::bad, 2500);
                 return;
             case UnlockResult::Refused:
                 a.toast("Storage error", color::bad, 2500);
                 return;
             case UnlockResult::Failed:
+                if (r.retry_delay_ms) a.arm_attempt_delay();  // counted: no free retries
                 a.toast(vault_error_str(r.error), color::bad, 2500);
                 return;
             case UnlockResult::Empty:
@@ -216,6 +217,7 @@ void restore_from(const std::string& name) {
                 a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
                 return;
             case RestoreCheck::Failed:
+                if (locked && r.retry_delay_ms) a.arm_attempt_delay();
                 a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
                 return;
             case RestoreCheck::Empty:
