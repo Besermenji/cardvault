@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "core/flows.h"
+
 namespace cv {
 namespace test {
 
@@ -146,12 +148,15 @@ void handle(ui::App& a, const std::string& line) {
         delay(50);
         ESP.restart();
     } else if (cmd == "factory") {
-        reply("");
-        Serial.flush();
         a.router.clear_now();
         a.session.close();
-        a.store.erase();
-        a.guard.reset();
+        WipeResult w = wipe_vault(a.store, a.guard);
+        if (!w.erased || !w.reset) {
+            error(w.erased ? "counter reset failed" : "erase failed");
+            return;
+        }
+        reply("");
+        Serial.flush();
         device::save_settings(Settings());
         delay(50);
         ESP.restart();

@@ -1,6 +1,7 @@
 #include "ui/app.h"
 
 #include "core/flows.h"
+#include "core/messages.h"
 
 #include <M5Cardputer.h>
 
@@ -38,8 +39,29 @@ void App::wipe_and_reboot(const char* reason) {
         dialog(*canvas, "Erasing vault", reason, color::bad);
         canvas->pushSprite(0, 0);
     }
-    store.erase();
-    guard.reset();
+    WipeResult r = wipe_vault(store, guard);
+    if (!r.erased || !r.reset) {
+        // Stop instead of rebooting: a boot with an exhausted counter erases
+        // again, so restarting here could loop and wear out the flash.
+        const char* title = r.erased ? msg::kWipeErasedTitle : msg::kWipeFailedTitle;
+        const char* body = r.erased  ? msg::kWipeCounterStuck
+                           : r.armed ? msg::kWipeRetry
+                                     : msg::kWipeNotArmed;
+        if (canvas) {
+            clear(*canvas);
+            dialog(*canvas, title, body, color::bad);
+            canvas->pushSprite(0, 0);
+        }
+        for (;;) {
+            delay(1000);
+        }
+    }
+    if (!store.mounted() && canvas) {
+        // The data is gone; the next boot formats the blank partition.
+        clear(*canvas);
+        dialog(*canvas, msg::kWipeErasedTitle, msg::kWipeRemount, color::warn);
+        canvas->pushSprite(0, 0);
+    }
     delay(2500);
     ESP.restart();
     for (;;) {

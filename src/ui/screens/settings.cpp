@@ -3,6 +3,7 @@
 #include <esp_heap_caps.h>
 
 #include "core/flows.h"
+#include "core/messages.h"
 #include "platform/sd_backup.h"
 #include "ui/app.h"
 #include "version.h"
@@ -238,7 +239,10 @@ void restore_from(const std::string& name) {
                 return;
             }
             a.router.reset(make_home());
-            a.toast("Backup restored");
+            if (a.guard.failures() > 0)
+                a.toast(msg::kCounterNotReset, color::warn, 3000);
+            else
+                a.toast("Backup restored");
         }, color::bad));
     }));
 }

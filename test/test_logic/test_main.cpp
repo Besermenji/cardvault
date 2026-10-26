@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 
 #include "core/entry_rules.h"
@@ -406,6 +407,14 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(int(lines.size()) <= msg::kDialogMaxLines);
     TEST_ASSERT_NOT_NULL(strstr(msg::kStorageSetup, "NOT affected"));
     TEST_ASSERT_TRUE(strlen(msg::kStorageSetupTitle) <= 20);
+    for (const char* m : {msg::kWipeResume, msg::kWipeCounterStuck, msg::kWipeRetry,
+                          msg::kWipeNotArmed, msg::kWipeRemount}) {
+        TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
+                                     msg::kDialogMaxLines,
+                                 m);
+    }
+    TEST_ASSERT_TRUE(strlen(msg::kWipeErasedTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kWipeFailedTitle) <= 20);
 }
 
 int main() {

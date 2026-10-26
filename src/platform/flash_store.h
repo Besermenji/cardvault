@@ -14,11 +14,13 @@ public:
     // a damaged filesystem is never silently destroyed.
     bool begin();
     // Erases and formats the partition (explicit user action).
-    bool format() { return erase(); }
+    bool format() { return erase() && mounted_; }
     bool exists() override;
     bool read(std::vector<uint8_t>& out) override;
     bool write(const std::vector<uint8_t>& data) override;
-    // Erases the entire partition (all blocks), then reformats it.
+    // Erases the entire partition (all blocks), then tries to remount it.
+    // The result says only whether the data was destroyed; check mounted()
+    // for the remount.
     bool erase() override;
     bool mounted() const { return mounted_; }
     static bool has_partition();

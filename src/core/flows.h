@@ -21,7 +21,24 @@ enum class BootRoute {
     Setup,
 };
 
+// An exhausted counter wins over everything but a missing partition: an
+// interrupted wipe may have left the partition unmountable, and the wipe
+// must finish before any prompt to format or set up.
 BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, bool vault_exists);
+
+// ---- Wipe -------------------------------------------------------------------
+
+struct WipeResult {
+    bool armed = false;   // counter was exhausted before the erase: boot retries the wipe
+    bool erased = false;  // vault data destroyed
+    bool reset = false;   // counter back to 0 afterwards
+};
+
+// Erases the vault. The counter is first persisted as exhausted so that a
+// power cut or failed erase is finished on the next boot, and is reset only
+// after the erase succeeded. Persisting the counter is best effort: the erase
+// runs either way, and `armed` tells the caller whether a retry is scheduled.
+WipeResult wipe_vault(BlobStore& store, AttemptGuard& guard);
 
 // ---- Unlock ---------------------------------------------------------------
 
