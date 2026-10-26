@@ -311,6 +311,45 @@ void test_remove_entry() {
     TEST_ASSERT_NOT_NULL(d.find(b));
 }
 
+struct CountingStore : MemoryStore {
+    int writes = 0;
+    bool write(const std::vector<uint8_t>& data) override {
+        writes++;
+        return MemoryStore::write(data);
+    }
+};
+
+void test_kdf_check_retunes_before_writing() {
+    CountingStore store;
+    VaultSession s;
+    int calls = 0;
+    uint32_t seen_us = 0;
+    KdfCheck check = [&](uint32_t us, KdfParams& kdf) {
+        calls++;
+        seen_us = us;
+        kdf.passes = 4;
+        return true;
+    };
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.create(store, "hunter2 hunter2", kFast, check)));
+    TEST_ASSERT_EQUAL(1, calls);
+    TEST_ASSERT_TRUE(seen_us > 0);
+    TEST_ASSERT_EQUAL(4, s.header().kdf.passes);
+    TEST_ASSERT_EQUAL(1, store.writes);  // one file, never a copy with the old params
+    s.close();
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "hunter2 hunter2")));
+    TEST_ASSERT_EQUAL(4, s.header().kdf.passes);
+
+    // Change passphrase uses the same loop; an invalid suggestion is ignored.
+    KdfCheck bad = [&](uint32_t, KdfParams& kdf) {
+        calls++;
+        kdf.passes = 1;
+        return true;
+    };
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.change_passphrase(store, "second passphrase", kFast, bad)));
+    TEST_ASSERT_EQUAL(2, calls);
+    TEST_ASSERT_EQUAL(kFast.passes, s.header().kdf.passes);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_serializer_round_trip);
@@ -328,5 +367,6 @@ int main() {
     RUN_TEST(test_check_layout_rejects_bad_shapes);
     RUN_TEST(test_check_layout_size_cap_edges);
     RUN_TEST(test_remove_entry);
+    RUN_TEST(test_kdf_check_retunes_before_writing);
     return UNITY_END();
 }

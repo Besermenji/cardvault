@@ -88,8 +88,9 @@ pio run -e cardputer -t upload
 **How your data is protected**
 
 - A random 256-bit data key encrypts the vault with **XChaCha20-Poly1305**. The data key is wrapped by a
-  key derived from your passphrase with **Argon2id** (memory-hard; parameters calibrated per device and
-  stored in the file header). All header fields are authenticated; any modified byte is rejected.
+  key derived from your passphrase with **Argon2id** (memory-hard; memory is sized from the free heap and the passes are timed on
+  your device for a ~2 s unlock, then checked once against a real derive; both are stored in the file header
+  and shown in Settings > About. Change passphrase re-tunes them). All header fields are authenticated; any modified byte is rejected.
 - Plaintext is padded to 256-byte blocks so the file size leaks little about its contents.
 - Decrypted data lives only in RAM while unlocked and is wiped (`crypto_wipe`) on lock, including
   every string buffer (wiping allocators).

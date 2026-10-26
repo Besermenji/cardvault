@@ -344,12 +344,17 @@ void test_kdf_calibration_fits_heap_and_time() {
     // Allocate what the UI holds during an unlock (screen canvas) first.
     void* canvas = heap_caps_malloc(240 * 135 * 2, MALLOC_CAP_8BIT);
     TEST_ASSERT_NOT_NULL(canvas);
-    KdfParams p = device::calibrate_kdf(2000);
-    char msg[160];
-    snprintf(msg, sizeof msg, "calibrated mem=%u KiB passes=%u largest_free=%u",
-             unsigned(p.mem_kib), unsigned(p.passes),
-             unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    KdfTuning t = device::calibrate_kdf(2000);
+    const KdfParams& p = t.params;
+    char msg[200];
+    snprintf(msg, sizeof msg, "calibrated mem=%u KiB passes=%u largest_free=%u", unsigned(p.mem_kib),
+             unsigned(p.passes), unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
     TEST_MESSAGE(msg);
+    snprintf(msg, sizeof msg, "probes A(3)=%u us B(%u)=%u us per_pass=%u us overhead=%u us",
+             unsigned(t.probe_a_us), unsigned(t.probe_b_passes), unsigned(t.probe_b_us),
+             unsigned(t.per_pass_us), unsigned(t.overhead_us));
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_EQUAL_MESSAGE(int(KdfTuneStatus::Ok), int(t.status), "calibration clamped or failed");
     TEST_ASSERT_TRUE(kdf_params_valid(p));
     TEST_ASSERT_TRUE_MESSAGE(p.mem_kib >= 128, "Argon2 memory below 128 KiB");
 
@@ -357,9 +362,14 @@ void test_kdf_calibration_fits_heap_and_time() {
     uint32_t t0 = millis();
     TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>("pass"), 4, salt, p));
     uint32_t ms = millis() - t0;
-    snprintf(msg, sizeof msg, "unlock KDF took %u ms", unsigned(ms));
+    // The fit alone should already be on target, so the closed loop that
+    // follows the real derive has nothing to do.
+    bool retuned = kdf_check(t, ms * 1000, kKdfTargetMs, device::time_kdf);
+    snprintf(msg, sizeof msg, "unlock KDF took %u ms (fit predicted %u ms), closed loop retuned=%d",
+             unsigned(ms), unsigned(kdf_estimate_ms(t)), int(retuned));
     TEST_MESSAGE(msg);
-    TEST_ASSERT_TRUE_MESSAGE(ms >= 1000 && ms <= 4000, "unlock time outside 1-4 s");
+    TEST_ASSERT_TRUE_MESSAGE(ms >= 1500 && ms <= 2500, "unlock time outside 2 s +-25%");
+    TEST_ASSERT_FALSE_MESSAGE(retuned, "closed loop had to correct the fit");
     heap_caps_free(canvas);
 }
 
@@ -367,7 +377,7 @@ void test_kdf_work_cap_leaves_headroom() {
     // Today's calibration sits well below the cap (existing vaults stay
     // openable), and the worst header the cap still accepts at the memory this
     // device uses stays bounded.
-    KdfParams p = device::calibrate_kdf(2000);
+    KdfParams p = device::calibrate_kdf(2000).params;
     uint64_t work = uint64_t(p.mem_kib) * p.passes;
     KdfParams worst{p.mem_kib, kdf_max_passes(p.mem_kib)};
     uint8_t out[32], salt[16] = {2};
@@ -391,7 +401,7 @@ void test_full_vault_cycle_on_flash() {
     kv.begin();
     AttemptGuard guard(kv);
     guard.reset();
-    KdfParams p = device::calibrate_kdf(500);
+    KdfParams p = device::calibrate_kdf(500).params;
     VaultSession s;
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.create(store, "device test pass", p)));
     Entry e;

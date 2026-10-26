@@ -1,11 +1,19 @@
 // An unlocked vault: holds the data key and decrypted contents in RAM.
 #pragma once
 
+#include <cstdint>
+#include <functional>
+
 #include "vault/format.h"
 #include "vault/model.h"
 #include "vault/storage.h"
 
 namespace cv {
+
+// Closed loop on the real key derivation: called once with how long it took
+// (µs). Returning true with changed params derives again with those before
+// anything is written.
+using KdfCheck = std::function<bool(uint32_t derive_us, KdfParams& kdf)>;
 
 class VaultSession {
 public:
@@ -19,7 +27,8 @@ public:
     const Header& header() const { return hdr_; }
 
     // Creates an empty vault protected by `pass` and writes it to `store`.
-    VaultError create(BlobStore& store, const SString& pass, const KdfParams& kdf);
+    VaultError create(BlobStore& store, const SString& pass, const KdfParams& kdf,
+                      const KdfCheck& check = nullptr);
     // Reads and decrypts the vault in `store`.
     VaultError unlock(BlobStore& store, const SString& pass);
     // Decrypts a vault image (e.g. an SD backup) and makes it this session.
@@ -34,7 +43,7 @@ public:
     VaultError save(BlobStore& store);
     // New salt, new data key, new passphrase; then saves.
     VaultError change_passphrase(BlobStore& store, const SString& new_pass,
-                                 const KdfParams& kdf);
+                                 const KdfParams& kdf, const KdfCheck& check = nullptr);
     // Encrypts the current contents into a standalone image protected by
     // `pass` (independent salt and data key). Session state is unchanged.
     VaultError export_image(const SString& pass, const KdfParams& kdf,
@@ -47,7 +56,8 @@ public:
 
 private:
     static VaultError build(const VaultData& data, const SString& pass, const KdfParams& kdf,
-                            Header& hdr, uint8_t dek[32], std::vector<uint8_t>& out);
+                            Header& hdr, uint8_t dek[32], std::vector<uint8_t>& out,
+                            const KdfCheck& check = nullptr);
 
     bool open_ = false;
     Header hdr_;

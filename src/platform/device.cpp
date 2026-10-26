@@ -1,9 +1,11 @@
 #include "platform/device.h"
 
 #include <M5Cardputer.h>
+#include <algorithm>
 #include <Preferences.h>
 #include <esp_bt.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <sys/time.h>
 
 namespace cv {
@@ -38,26 +40,25 @@ void save_settings(const Settings& s) {
     p.end();
 }
 
-KdfParams calibrate_kdf(uint32_t target_ms) {
-    // Leave headroom for the UI and serialization buffers during unlock.
-    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
-    uint32_t mem = 64;
-    for (uint32_t candidate : {256u, 192u, 128u}) {
-        if (largest >= candidate * 1024 + 64 * 1024) {
-            mem = candidate;
-            break;
-        }
+uint32_t time_kdf(const KdfParams& p) {
+    static const uint8_t kPass[] = {'c', 'a', 'l', 'i', 'b', 'r', 'a', 't', 'e'};
+    static const uint8_t kSalt[kSaltSize] = {0};
+    uint8_t out[32];
+    int64_t t0 = esp_timer_get_time();
+    if (!kdf_derive(out, kPass, sizeof kPass, kSalt, p)) return 0;
+    int64_t us = esp_timer_get_time() - t0;
+    return us < 1 ? 1 : uint32_t(us);
+}
+
+KdfTuning calibrate_kdf(uint32_t target_ms, uint32_t min_mem_kib) {
+    uint32_t floor = std::max(kMinKdfMemKib, std::min(min_mem_kib, kMaxKdfMemKib));
+    uint32_t mem = std::max(kdf_pick_mem(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)), floor);
+    for (;;) {
+        KdfTuning t = kdf_tune(mem, target_ms, time_kdf);
+        if (t.status != KdfTuneStatus::Failed || mem <= floor) return t;
+        // The work area did not fit after all: try a smaller one.
+        mem = mem > floor + 32 ? mem - 32 : floor;
     }
-    KdfParams probe{mem, kMinKdfPasses};
-    uint8_t out[32], salt[kSaltSize] = {0};
-    uint32_t t0 = millis();
-    kdf_derive(out, reinterpret_cast<const uint8_t*>("calibrate"), 9, salt, probe);
-    uint32_t elapsed = millis() - t0;
-    if (elapsed == 0) elapsed = 1;
-    uint32_t passes = uint32_t(uint64_t(target_ms) * kMinKdfPasses / elapsed);
-    if (passes < kMinKdfPasses) passes = kMinKdfPasses;
-    if (passes > kdf_max_passes(mem)) passes = kdf_max_passes(mem);
-    return KdfParams{mem, passes};
 }
 
 bool time_valid() { return time(nullptr) >= time_t(kTimeFloor); }
