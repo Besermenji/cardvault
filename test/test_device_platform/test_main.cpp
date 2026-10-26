@@ -3,12 +3,17 @@
 // They use the test partition table (vault at 0x410000) and test NVS
 // namespaces, so a real vault on the device is never touched.
 #include <Arduino.h>
+
+#include <algorithm>
+#include <cstring>
 #include <LittleFS.h>
 #include <M5Cardputer.h>
+#include <SD.h>
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <unity.h>
 
+#include "core/backup_names.h"
 #include "core/flows.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
@@ -72,10 +77,13 @@ void test_write_read_overwrite_roundtrip() {
     erase_vault_partition();
     FlashStore s;
     TEST_ASSERT_TRUE(s.begin());
-    std::vector<uint8_t> a(50000), b(1234), out;
+    std::vector<uint8_t> a(kMaxFileSize), b(1234), out;
     rng_fill(a.data(), a.size());
     rng_fill(b.data(), b.size());
-    TEST_ASSERT_TRUE(s.write(a));
+    std::vector<uint8_t> too_big(kMaxFileSize + 1, 1);
+    TEST_ASSERT_FALSE(s.write(too_big));  // larger than any legal vault
+    TEST_ASSERT_FALSE(s.exists());
+    TEST_ASSERT_TRUE(s.write(a));  // the largest legal vault
     TEST_ASSERT_TRUE(s.exists());
     TEST_ASSERT_TRUE(s.read(out));
     TEST_ASSERT_TRUE(out == a);
@@ -100,23 +108,118 @@ void test_persists_across_remount() {
     TEST_ASSERT_TRUE(out == data);
 }
 
+static std::vector<uint8_t> sealed_image(const char* pass = "device test pass") {
+    MemoryStore m;
+    VaultSession v;
+    v.create(m, pass, KdfParams{64, 3});
+    std::vector<uint8_t> img;
+    m.read(img);
+    return img;
+}
+
+static void put_raw(const char* path, const std::vector<uint8_t>& data) {
+    File f = LittleFS.open(path, "w");
+    TEST_ASSERT_TRUE(bool(f));
+    f.write(data.data(), data.size());
+    f.close();
+}
+
 void test_crash_before_rename_is_recovered() {
     erase_vault_partition();
     FlashStore s;
     TEST_ASSERT_TRUE(s.begin());
     // Simulate: new file fully written to vault.tmp, power lost before the
     // rename, and no previous vault.bin.
-    File f = LittleFS.open("/vault.tmp", "w");
-    f.write(reinterpret_cast<const uint8_t*>("NEWDATA"), 7);
-    f.close();
+    auto img = sealed_image();
+    put_raw("/vault.tmp", img);
     LittleFS.end();
     FlashStore after;
     TEST_ASSERT_TRUE(after.begin());
     TEST_ASSERT_TRUE(after.exists());
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
     std::vector<uint8_t> out;
-    after.read(out);
-    TEST_ASSERT_EQUAL(7, out.size());
-    TEST_ASSERT_EQUAL_MEMORY("NEWDATA", out.data(), 7);
+    TEST_ASSERT_TRUE(after.read(out));
+    TEST_ASSERT_TRUE(out == img);
+}
+
+void test_truncated_tmp_is_deleted_not_promoted() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto img = sealed_image();
+    img.resize(img.size() / 2);  // power cut mid-write
+    put_raw("/vault.tmp", img);
+    LittleFS.end();
+    FlashStore after;
+    TEST_ASSERT_TRUE(after.begin());
+    TEST_ASSERT_FALSE(after.exists());  // stays on the Setup route
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+}
+
+void test_rename_fallback_leftovers_are_recovered() {
+    // Crash inside write()'s fallback: vault.bin moved to vault.bak, the new
+    // version still in vault.tmp. The newer complete image wins.
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto old_img = sealed_image("old passphrase"), new_img = sealed_image("new passphrase");
+    put_raw("/vault.bak", old_img);
+    put_raw("/vault.tmp", new_img);
+    LittleFS.end();
+    {
+        FlashStore after;
+        TEST_ASSERT_TRUE(after.begin());
+        std::vector<uint8_t> out;
+        TEST_ASSERT_TRUE(after.read(out));
+        TEST_ASSERT_TRUE(out == new_img);
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    }
+    // Only the old copy survived (tmp truncated): it is promoted.
+    erase_vault_partition();
+    TEST_ASSERT_TRUE(s.begin());
+    put_raw("/vault.bak", old_img);
+    std::vector<uint8_t> partial(new_img.begin(), new_img.begin() + new_img.size() / 2);
+    put_raw("/vault.tmp", partial);
+    LittleFS.end();
+    {
+        FlashStore after;
+        TEST_ASSERT_TRUE(after.begin());
+        std::vector<uint8_t> out;
+        TEST_ASSERT_TRUE(after.read(out));
+        TEST_ASSERT_TRUE(out == old_img);
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+        TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    }
+}
+
+void test_leftover_bak_next_to_vault_is_removed() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto img = sealed_image();
+    TEST_ASSERT_TRUE(s.write(img));
+    put_raw("/vault.bak", sealed_image("old passphrase"));
+    LittleFS.end();
+    FlashStore after;
+    TEST_ASSERT_TRUE(after.begin());
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.bak"));
+    std::vector<uint8_t> out;
+    TEST_ASSERT_TRUE(after.read(out) && out == img);
+}
+
+void test_oversize_vault_is_refused_before_allocating() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    std::vector<uint8_t> big(kMaxFileSize + 1, 0x5A), out;
+    put_raw("/vault.bin", big);
+    TEST_ASSERT_TRUE(s.exists());
+    TEST_ASSERT_FALSE(s.read(out));
+    TEST_ASSERT_EQUAL(0, out.size());
+    std::vector<uint8_t> empty;
+    put_raw("/vault.bin", empty);
+    TEST_ASSERT_FALSE(s.read(out));
 }
 
 void test_stale_tmp_does_not_replace_good_vault() {
@@ -134,11 +237,59 @@ void test_stale_tmp_does_not_replace_good_vault() {
     TEST_ASSERT_TRUE(after.begin());
     TEST_ASSERT_TRUE(after.read(out));
     TEST_ASSERT_TRUE(out == good);
+    // A leftover tmp next to a vault is old ciphertext: it is deleted at boot.
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
     // The next save still works and replaces the stale temp file.
     std::vector<uint8_t> next(200, 2);
     TEST_ASSERT_TRUE(after.write(next));
     TEST_ASSERT_TRUE(after.read(out));
     TEST_ASSERT_TRUE(out == next);
+}
+
+// Counts occurrences of `needle` anywhere in the raw vault partition.
+static size_t count_in_partition(const uint8_t* needle, size_t n) {
+    const esp_partition_t* p = vault_part();
+    std::vector<uint8_t> buf(4096);
+    size_t hits = 0;
+    for (size_t off = 0; off < p->size; off += buf.size() - n) {
+        size_t len = std::min(buf.size(), size_t(p->size - off));
+        if (esp_partition_read(p, off, buf.data(), len) != ESP_OK) break;
+        for (size_t i = 0; i + n <= len; i++)
+            if (memcmp(buf.data() + i, needle, n) == 0) hits++;
+        if (off + len >= p->size) break;
+    }
+    return hits;
+}
+
+void test_compact_removes_stale_old_header() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    VaultSession v;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(v.create(s, "first passphrase", KdfParams{64, 3})));
+    uint8_t old_salt[kSaltSize];
+    memcpy(old_salt, v.header().salt, kSaltSize);
+    TEST_ASSERT_EQUAL(int(VaultError::Ok),
+                      int(v.change_passphrase(s, "second passphrase", KdfParams{64, 3})));
+    uint8_t new_salt[kSaltSize];
+    memcpy(new_salt, v.header().salt, kSaltSize);
+    TEST_ASSERT_TRUE(memcmp(old_salt, new_salt, kSaltSize) != 0);
+
+    char msg[80];
+    snprintf(msg, sizeof msg, "old header copies before compact: %u",
+             unsigned(count_in_partition(old_salt, kSaltSize)));
+    TEST_MESSAGE(msg);
+
+    bool missing = false;
+    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(v, s, {}, missing)));
+    TEST_ASSERT_EQUAL(0, count_in_partition(old_salt, kSaltSize));
+    // The current image may appear more than once (small files live in
+    // LittleFS's metadata log, and tmp-then-rename commits it twice).
+    TEST_ASSERT_TRUE(count_in_partition(new_salt, kSaltSize) >= 1);
+    // The vault still opens with the new passphrase only.
+    VaultSession again;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(again.unlock(s, "second passphrase")));
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(again.unlock(s, "first passphrase")));
 }
 
 void test_erase_destroys_everything() {
@@ -212,6 +363,26 @@ void test_kdf_calibration_fits_heap_and_time() {
     heap_caps_free(canvas);
 }
 
+void test_kdf_work_cap_leaves_headroom() {
+    // Today's calibration sits well below the cap (existing vaults stay
+    // openable), and the worst header the cap still accepts at the memory this
+    // device uses stays bounded.
+    KdfParams p = device::calibrate_kdf(2000);
+    uint64_t work = uint64_t(p.mem_kib) * p.passes;
+    KdfParams worst{p.mem_kib, kdf_max_passes(p.mem_kib)};
+    uint8_t out[32], salt[16] = {2};
+    uint32_t t0 = millis();
+    TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>("pass"), 4, salt, worst));
+    uint32_t ms = millis() - t0;
+    char msg[160];
+    snprintf(msg, sizeof msg, "calibrated work=%u (cap %u), worst accepted %u KiB x%u took %u ms",
+             unsigned(work), unsigned(kMaxKdfWork), unsigned(worst.mem_kib),
+             unsigned(worst.passes), unsigned(ms));
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_TRUE_MESSAGE(work * 2 <= kMaxKdfWork, "calibrated work above half the cap");
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 12000, "worst accepted header blocks over 12 s");
+}
+
 void test_full_vault_cycle_on_flash() {
     erase_vault_partition();
     FlashStore store;
@@ -283,10 +454,40 @@ void test_battery_reading_survives_rng_use() {
     TEST_ASSERT_TRUE_MESSAGE(abs(after - before) <= 10, "battery reading disturbed by RNG");
 }
 
-// ---- SD card (skipped without a working card) --------------------------------
+// ---- SD card ------------------------------------------------------------------
+// Skipped without a working card. Build with -DCV_EXPECT_SD to make a missing
+// or stalled card a failure (hardware checklist, #17):
+//   PLATFORMIO_BUILD_FLAGS=-DCV_EXPECT_SD pio test -e cardputer-test
+
+static void require_card() {
+    if (sd::mount()) return;
+#ifdef CV_EXPECT_SD
+    TEST_FAIL_MESSAGE(sd::wedged() ? "SD card stalled the driver" : "SD card did not mount");
+#else
+    TEST_IGNORE_MESSAGE("no working SD card inserted");
+#endif
+}
+
+void test_sd_mount_never_blocks_longer_than_timeout() {
+    uint32_t t0 = millis();
+    bool ok = sd::mount();
+    uint32_t ms = millis() - t0;
+    char msg[96];
+    snprintf(msg, sizeof msg, "sd::mount() -> %s in %u ms (wedged=%d)", ok ? "OK" : "fail",
+             unsigned(ms), int(sd::wedged()));
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 5500, "mount blocked longer than its timeout");
+#ifdef CV_EXPECT_SD
+    TEST_ASSERT_TRUE_MESSAGE(ok, msg);
+    // A mount cycle repeats cleanly (no leaked driver or bus state).
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::mount());
+#endif
+    sd::unmount();
+}
 
 void test_sd_backup_roundtrip() {
-    if (!sd::mount()) TEST_IGNORE_MESSAGE("no working SD card inserted");
+    require_card();
     std::vector<uint8_t> image(5000), back;
     rng_fill(image.data(), image.size());
     std::string name;
@@ -296,6 +497,40 @@ void test_sd_backup_roundtrip() {
     auto list = sd::list_backups();
     TEST_ASSERT_TRUE(!list.empty() && list[0] == name);  // newest first
     TEST_ASSERT_TRUE(sd::remove_backup(name));
+    sd::unmount();
+}
+
+void test_sd_numbering_never_overwrites_and_caps_reads() {
+    require_card();
+    std::vector<uint8_t> a(3000), b(3000), back;
+    rng_fill(a.data(), a.size());
+    rng_fill(b.data(), b.size());
+    std::string na, nb;
+    TEST_ASSERT_TRUE(sd::write_backup(a, na));
+    // Unmounted in between, like the UI does after every operation.
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::write_backup(b, nb));
+    TEST_ASSERT_TRUE(na != nb);
+    TEST_ASSERT_EQUAL(backup_number(na) + 1, backup_number(nb));
+    TEST_ASSERT_TRUE(sd::read_backup(na, back) && back == a);  // first one intact
+    TEST_ASSERT_TRUE(sd::read_backup(nb, back) && back == b);
+
+    // A file past the size cap is refused without being loaded.
+    std::string big = backup_name(99990000);
+    File f = SD.open((std::string("/cardvault/") + big).c_str(), FILE_WRITE);
+    TEST_ASSERT_TRUE(bool(f));
+    std::vector<uint8_t> chunk(4096, 0xAB);
+    for (size_t w = 0; w <= kMaxFileSize; w += chunk.size()) f.write(chunk.data(), chunk.size());
+    f.close();
+    back.clear();
+    TEST_ASSERT_FALSE(sd::read_backup(big, back));
+    TEST_ASSERT_EQUAL(0, back.size());
+
+    TEST_ASSERT_TRUE(sd::remove_backup(big));
+    TEST_ASSERT_TRUE(sd::remove_backup(na));
+    TEST_ASSERT_TRUE(sd::remove_backup(nb));
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::mount());  // remount after unmount works
     sd::unmount();
 }
 
@@ -311,15 +546,23 @@ void setup() {
         RUN_TEST(test_write_read_overwrite_roundtrip);
         RUN_TEST(test_persists_across_remount);
         RUN_TEST(test_crash_before_rename_is_recovered);
+        RUN_TEST(test_truncated_tmp_is_deleted_not_promoted);
+        RUN_TEST(test_rename_fallback_leftovers_are_recovered);
+        RUN_TEST(test_leftover_bak_next_to_vault_is_removed);
+        RUN_TEST(test_oversize_vault_is_refused_before_allocating);
         RUN_TEST(test_stale_tmp_does_not_replace_good_vault);
+        RUN_TEST(test_compact_removes_stale_old_header);
         RUN_TEST(test_erase_destroys_everything);
         RUN_TEST(test_nvs_guard_persists_across_instances);
         RUN_TEST(test_test_build_uses_isolated_nvs);
         RUN_TEST(test_kdf_calibration_fits_heap_and_time);
+        RUN_TEST(test_kdf_work_cap_leaves_headroom);
         RUN_TEST(test_full_vault_cycle_on_flash);
         RUN_TEST(test_hw_rng_output_looks_random);
         RUN_TEST(test_battery_reading_survives_rng_use);
+        RUN_TEST(test_sd_mount_never_blocks_longer_than_timeout);
         RUN_TEST(test_sd_backup_roundtrip);
+        RUN_TEST(test_sd_numbering_never_overwrites_and_caps_reads);
         erase_vault_partition();
     }
     UNITY_END();

@@ -75,6 +75,13 @@ pio run -e cardputer -t upload
    (Settings → Set clock, UTC): the Cardputer ADV has no battery-backed clock.
 5. **Backups** — Settings → *Backup to SD*. You choose a passphrase for the backup (it may be the same).
    Restore with Settings → *Restore from SD* (also available on the lock screen via <kbd>Tab</kbd>).
+   Backups are numbered (`backup-0001.cvb`, ...) and never overwrite each other; the newest is listed first.
+6. **Compact vault** — Settings → *Compact vault*. Flash keeps old encrypted copies of the vault after
+   every save, including, after a passphrase change or restore, a copy that the **old** passphrase still
+   opens. Compact first saves a verified safety copy to SD (it opens with your vault passphrase), then
+   erases the vault storage and writes the current vault back. It needs an SD card, and it is offered
+   automatically after a passphrase change or restore. Keep the power on while it runs; if the rewrite
+   fails, the device will not lock until the vault is saved again.
 
 ## Security model
 
@@ -96,6 +103,8 @@ pio run -e cardputer -t upload
 - **Flash dumps.** Without ESP32 secure boot + flash encryption (irreversible eFuse changes, not enabled
   by default), an attacker holding your device can read the encrypted vault off the flash chip and guess
   passphrases on a computer, bypassing the 10-attempt limit. Only a **strong passphrase** stops that.
+  Until you run *Compact vault*, such a dump can also contain older versions of the vault, including
+  ones protected by a passphrase you have since changed.
 - A device that was tampered with (malicious firmware) *before* you type your passphrase.
 - Shoulder surfing and cameras while secrets are revealed.
 - Loss of the device without a backup.

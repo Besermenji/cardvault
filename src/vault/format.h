@@ -29,6 +29,8 @@ constexpr size_t kNonceSize = 24;
 constexpr size_t kMacSize = 16;
 constexpr size_t kMaxPayload = 48 * 1024;
 constexpr size_t kPadBlock = 256;
+constexpr size_t kMaxFileSize =
+    kHeaderSize + kNonceSize + kMacSize + kMaxPayload + kPadBlock;
 constexpr size_t kMinPassphraseLen = 8;
 constexpr size_t kMaxPassphraseLen = 128;
 
@@ -72,8 +74,16 @@ void header_new_salt(Header& h);
 void header_wrap(Header& h, const uint8_t kek[32], const uint8_t dek[32]);
 VaultError header_unwrap(const Header& h, const uint8_t kek[32], uint8_t dek[32]);
 
+// Structural checks that need no passphrase: header (magic, version, KDF
+// bounds), minimum and maximum size, and padded body length. Run it on every
+// untrusted file before any KDF work or allocation sized from the file.
+VaultError check_layout(const uint8_t* file, size_t len, Header* out = nullptr);
+
 VaultError seal_file(const Header& h, const uint8_t dek[32], const uint8_t* payload,
                      size_t len, std::vector<uint8_t>& out);
+// check_layout, then open_body.
 VaultError open_file(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload);
+// Decrypts the body of a file that already passed check_layout.
+VaultError open_body(const uint8_t* file, size_t len, const uint8_t dek[32], SBytes& payload);
 
 }  // namespace cv

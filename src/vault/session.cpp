@@ -65,7 +65,7 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     if (key_ok) *key_ok = false;
     if (pass.empty()) return VaultError::EmptyPassphrase;
     Header h;
-    VaultError e = Header::decode(file.data(), file.size(), h);
+    VaultError e = check_layout(file.data(), file.size(), &h);
     if (e != VaultError::Ok) return e;
 
     Key32 kek;
@@ -77,7 +77,7 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     if (key_ok) *key_ok = true;
 
     SBytes payload;
-    e = open_file(file.data(), file.size(), dek.data(), payload);
+    e = open_body(file.data(), file.size(), dek.data(), payload);  // layout checked above
     if (e != VaultError::Ok) return e;
     e = deserialize(payload.data(), payload.size(), data_);
     if (e != VaultError::Ok) return e;
@@ -88,13 +88,17 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     return VaultError::Ok;
 }
 
-VaultError VaultSession::save(BlobStore& store) {
+VaultError VaultSession::seal(std::vector<uint8_t>& out) const {
     if (!open_) return VaultError::NotOpen;
     SBytes payload;
     VaultError e = serialize(data_, payload);
     if (e != VaultError::Ok) return e;
+    return seal_file(hdr_, dek_.data(), payload.data(), payload.size(), out);
+}
+
+VaultError VaultSession::save(BlobStore& store) {
     std::vector<uint8_t> file;
-    e = seal_file(hdr_, dek_.data(), payload.data(), payload.size(), file);
+    VaultError e = seal(file);
     if (e != VaultError::Ok) return e;
     return store.write(file) ? VaultError::Ok : VaultError::Io;
 }
@@ -129,7 +133,7 @@ void VaultSession::close() {
 }
 
 VaultError VaultSession::peek_header(const std::vector<uint8_t>& file, Header& out) {
-    return Header::decode(file.data(), file.size(), out);
+    return check_layout(file.data(), file.size(), &out);
 }
 
 }  // namespace cv

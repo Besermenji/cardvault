@@ -22,6 +22,61 @@ void format_duration(uint32_t s, char* buf, size_t n) {
         snprintf(buf, n, "%u min", unsigned(s / 60));
 }
 
+// SD failures: a card that stalled the driver gets its own message, so it is
+// not reported as missing or as a generic read/write error.
+void show_sd_error(const char* title, const char* text, uint16_t col = color::bad) {
+    if (sd::wedged())
+        app().router.push(make_message(msg::kSdStalledTitle, msg::kSdStalled, color::bad));
+    else
+        app().router.push(make_message(title, text, col));
+}
+
+void show_no_card(const char* hint) { show_sd_error("No SD card", hint, color::warn); }
+
+// Rewrites the vault so flash holds only the current image. A verified copy
+// of the same image goes to SD first, so a power cut during the erase cannot
+// lose the vault. A storage failure leaves the vault only in memory: the
+// device then refuses to lock and offers a retry (no second SD copy needed).
+void run_compact(bool safety_copy) {
+    App& a = app();
+    std::string name;
+    SafetyCopy copy;
+    if (safety_copy) {
+        copy = [&name](const std::vector<uint8_t>& image) {
+            bool ok = sd::write_backup(image, name);
+            sd::unmount();
+            return ok;
+        };
+    }
+    a.busy(safety_copy ? "Saving safety copy to SD..." : "Compacting...");
+    switch (compact_vault(a.session, a.store, copy, a.flash_missing)) {
+        case CompactResult::Done: {
+            char text[140];
+            if (safety_copy)
+                snprintf(text, sizeof text, msg::kCompactDoneWithCopy, name.c_str());
+            else
+                snprintf(text, sizeof text, "%s", msg::kCompactDone);
+            a.router.push(make_message(msg::kCompactTitle, text, color::good));
+            break;
+        }
+        case CompactResult::NoSafetyCopy:
+            show_sd_error(msg::kCompactTitle, msg::kCompactNeedsSd, color::warn);
+            break;
+        case CompactResult::StorageFailed:
+            a.router.push(make_confirm(msg::kCompactFailedTitle, msg::kCompactFailed,
+                                       [] { run_compact(false); }, color::bad));
+            break;
+        default:
+            a.toast("Could not compact", color::bad, 3000);
+            break;
+    }
+}
+
+void compact_flow() {
+    app().router.push(
+        make_confirm(msg::kCompactTitle, msg::kCompactConfirm, [] { run_compact(true); }));
+}
+
 void change_passphrase_flow() {
     if (attempt_delay_active()) return;
     InputOpts o = existing_passphrase_opts("First confirm your current passphrase");
@@ -65,10 +120,8 @@ void change_passphrase_flow() {
             a.busy("Re-encrypting...");
             VaultError e = a.session.change_passphrase(a.store, next, a.session.header().kdf);
             if (e == VaultError::Ok)
-                a.router.push(make_message("Passphrase changed",
-                                           "Old SD backups still open with the passphrase they "
-                                           "were made with.",
-                                           color::good));
+                a.router.push(make_confirm(msg::kCompactAfterPassTitle, msg::kCompactAfterPass,
+                                           [] { run_compact(true); }, color::good));
             else
                 a.toast(vault_error_str(e), color::bad, 3000);
         });
@@ -126,7 +179,7 @@ public:
         if (sel_ >= first_ + visible) first_ = sel_ - visible + 1;
         static const char* labels[kRows] = {"Auto-lock",       "Brightness",     "Set clock (UTC)",
                                             "Change passphrase", "Backup to SD", "Restore from SD",
-                                            "About",           "Erase vault"};
+                                            "About",           "Compact vault",  "Erase vault"};
         for (int i = 0; i < visible && first_ + i < kRows; i++) {
             int idx = first_ + i;
             int y = kBodyY + i * row_h;
@@ -149,7 +202,7 @@ public:
     }
 
 private:
-    static constexpr int kRows = 8;
+    static constexpr int kRows = 9;
 
     void adjust(int d) {
         App& a = app();
@@ -177,7 +230,8 @@ private:
             case 4: start_backup_flow(); break;
             case 5: start_restore_flow(); break;
             case 6: show_about(); break;
-            case 7: erase_flow(); break;
+            case 7: compact_flow(); break;
+            case 8: erase_flow(); break;
         }
     }
 
@@ -192,8 +246,10 @@ bool restore_guarded() { return !app().session.is_open() && app().store.exists()
 
 void restore_from(const std::string& name) {
     auto image = std::make_shared<std::vector<uint8_t>>();
-    if (!sd::read_backup(name, *image)) {
-        app().router.push(make_message("Restore", "Could not read the backup file.", color::bad));
+    bool read_ok = sd::read_backup(name, *image);
+    sd::unmount();  // the image is in RAM; the card is not needed any more
+    if (!read_ok) {
+        show_sd_error("Restore", "Could not read the backup file.");
         return;
     }
     // restore_check() validates the file (before any attempt is counted).
@@ -241,6 +297,9 @@ void restore_from(const std::string& name) {
                 return;
             }
             a.router.reset(make_home());
+            // The replaced vault is still in flash and opens with its old passphrase.
+            a.router.push(make_confirm(msg::kCompactAfterRestoreTitle, msg::kCompactAfterRestore,
+                                       [] { run_compact(true); }, color::good));
             if (a.guard.failures() > 0)
                 a.toast(msg::kCounterNotReset, color::warn, 3000);
             else
@@ -257,11 +316,13 @@ void start_backup_flow() {
     if (!app().session.is_open()) return;
     app().busy("Checking SD card...");
     if (!sd::mount()) {
-        app().router.push(make_message("No SD card", "Insert a FAT32 microSD card and try again.",
-                                       color::warn));
+        show_no_card("Insert a FAT32 microSD card and try again.");
         return;
     }
-    ask_new_passphrase("Backup passphrase", [](SString& pass) {
+    // Stays mounted through the prompt; released when it completes or is
+    // cancelled (or the device locks).
+    auto hold = std::make_shared<sd::MountHold>();
+    ask_new_passphrase("Backup passphrase", [hold](SString& pass) {
         App& a = app();
         a.busy("Encrypting backup...");
         std::vector<uint8_t> image;
@@ -275,7 +336,7 @@ void start_backup_flow() {
         bool ok = sd::write_backup(image, name);
         sd::unmount();
         if (!ok) {
-            a.router.push(make_message("Backup failed", "Could not write to the SD card.", color::bad));
+            show_sd_error("Backup failed", "Could not write to the SD card.");
             return;
         }
         char msg[140];
@@ -289,8 +350,7 @@ void start_backup_flow() {
 void start_restore_flow() {
     app().busy("Reading SD card...");
     if (!sd::mount()) {
-        app().router.push(make_message("No SD card", "Insert the microSD card with your backup.",
-                                       color::warn));
+        show_no_card("Insert the microSD card with your backup.");
         return;
     }
     auto names = sd::list_backups();
@@ -300,10 +360,13 @@ void start_restore_flow() {
                                        color::warn));
         return;
     }
+    // Stays mounted while the menu is open; reading a backup unmounts, and
+    // leaving the menu (or locking) releases it.
+    auto hold = std::make_shared<sd::MountHold>();
     std::vector<MenuItem> items;
     for (auto& n : names) {
         std::string name = n;
-        items.push_back({SString(name.c_str()), [name] { restore_from(name); }});
+        items.push_back({SString(name.c_str()), [name, hold] { restore_from(name); }});
     }
     app().router.push(make_menu("Choose backup", std::move(items)));
 }

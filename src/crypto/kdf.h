@@ -16,8 +16,15 @@ constexpr uint32_t kMinKdfMemKib = 64;
 constexpr uint32_t kMaxKdfMemKib = 4096;
 constexpr uint32_t kMinKdfPasses = 3;
 constexpr uint32_t kMaxKdfPasses = 1000;
+// Upper bound on mem_kib * passes (the Argon2 work, in KiB-passes), so a
+// crafted header cannot keep the device busy for long. Measured on a Cardputer
+// ADV: ~0.095 ms per KiB-pass, so the cap is ~9.5 s; a 2 s unlock is ~21000
+// (calibration in rc1 gave ~7000).
+constexpr uint64_t kMaxKdfWork = 100000;
 
 bool kdf_params_valid(const KdfParams& p);
+// Most passes allowed at this memory size (>= kMinKdfPasses for valid memory).
+uint32_t kdf_max_passes(uint32_t mem_kib);
 
 // Returns false if parameters are invalid or the work area cannot be allocated.
 bool kdf_derive(uint8_t out[32], const uint8_t* pass, size_t pass_len,

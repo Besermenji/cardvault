@@ -8,7 +8,14 @@ namespace cv {
 
 bool kdf_params_valid(const KdfParams& p) {
     return p.mem_kib >= kMinKdfMemKib && p.mem_kib <= kMaxKdfMemKib && p.mem_kib % 8 == 0 &&
-           p.passes >= kMinKdfPasses && p.passes <= kMaxKdfPasses;
+           p.passes >= kMinKdfPasses && p.passes <= kMaxKdfPasses &&
+           uint64_t(p.mem_kib) * p.passes <= kMaxKdfWork;
+}
+
+uint32_t kdf_max_passes(uint32_t mem_kib) {
+    if (mem_kib == 0) return 0;
+    uint64_t by_work = kMaxKdfWork / mem_kib;
+    return by_work < kMaxKdfPasses ? uint32_t(by_work) : kMaxKdfPasses;
 }
 
 bool kdf_derive(uint8_t out[32], const uint8_t* pass, size_t pass_len,

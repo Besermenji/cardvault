@@ -2,31 +2,80 @@
 
 #include <SD.h>
 #include <SPI.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <algorithm>
+#include <atomic>
+
+#include "core/backup_names.h"
+#include "vault/format.h"
 
 namespace cv {
 namespace sd {
 
 namespace {
 constexpr int kSck = 40, kMiso = 39, kMosi = 14, kCs = 12;
+constexpr uint32_t kSpiHz = 25000000;
+constexpr uint32_t kMountTimeoutMs = 5000;
 const char* kDir = "/cardvault";
 bool g_mounted = false;
-SPIClass g_spi(HSPI);
+
+// SD.begin runs in its own task so a stalled card cannot freeze the UI.
+// State is static and atomic: the task may outlive the call that started it.
+enum JobState : int { kIdle, kRunning, kDone, kAbandoned };
+std::atomic<int> g_job{kIdle};
+std::atomic<bool> g_job_ok{false};
+
+void mount_task(void*) {
+    // Same wiring as M5's Cardputer SD example: the default SPI bus.
+    SPI.begin(kSck, kMiso, kMosi, kCs);
+    bool ok = SD.begin(kCs, SPI, kSpiHz);
+    g_job_ok = ok;
+    int expected = kRunning;
+    if (!g_job.compare_exchange_strong(expected, kDone)) {
+        // The caller gave up waiting: release the card and bus ourselves.
+        if (ok) SD.end();
+        SPI.end();
+        g_job = kIdle;
+    }
+    vTaskDelete(nullptr);
+}
 }  // namespace
+
+bool wedged() { return g_job == kAbandoned; }
 
 bool mount() {
     if (g_mounted) return true;
-    g_spi.begin(kSck, kMiso, kMosi, kCs);
-    g_mounted = SD.begin(kCs, g_spi, 25000000);
-    if (g_mounted && !SD.exists(kDir)) SD.mkdir(kDir);
-    return g_mounted;
+    int idle = kIdle;
+    if (!g_job.compare_exchange_strong(idle, kRunning)) return false;  // stalled mount pending
+    g_job_ok = false;
+    if (xTaskCreatePinnedToCore(mount_task, "sd_mount", 6144, nullptr, 1, nullptr, 0) != pdPASS) {
+        g_job = kIdle;
+        return false;
+    }
+    for (uint32_t waited = 0; g_job == kRunning; waited += 10) {
+        if (waited >= kMountTimeoutMs) {
+            int running = kRunning;
+            if (g_job.compare_exchange_strong(running, kAbandoned)) return false;
+            break;  // finished just now
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    g_job = kIdle;
+    g_mounted = g_job_ok;
+    if (!g_mounted) {
+        SPI.end();
+        return false;
+    }
+    if (!SD.exists(kDir)) SD.mkdir(kDir);
+    return true;
 }
 
 void unmount() {
     if (!g_mounted) return;
     SD.end();
-    g_spi.end();
+    SPI.end();
     g_mounted = false;
 }
 
@@ -43,28 +92,33 @@ std::vector<std::string> list_backups() {
         f.close();
     }
     dir.close();
-    std::sort(names.rbegin(), names.rend());
+    sort_backups(names);
     return names;
 }
 
 bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
+    if (image.empty() || image.size() > kMaxFileSize) return false;
     if (!mount()) return false;
-    int next = 1;
-    for (auto& n : list_backups()) {
-        int v = atoi(n.c_str() + 7);  // "backup-0001.cvb"
-        if (n.rfind("backup-", 0) == 0 && v >= next) next = v + 1;
+    long number = next_backup_number(list_backups());
+    if (number < 0) return false;
+    // Never reuse a name that exists (even one list_backups did not show): a
+    // backup must not overwrite or extend an older one.
+    std::string path;
+    for (int tries = 0;; tries++, number++) {
+        if (tries == 100) return false;
+        name = backup_name(number);
+        if (backup_number(name) != number) return false;  // past the numbering range
+        path = std::string(kDir) + "/" + name;
+        if (!SD.exists(path.c_str())) break;
     }
-    char buf[32];
-    snprintf(buf, sizeof buf, "backup-%04d.cvb", next);
-    name = buf;
-    std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_WRITE);
     if (!f) return false;
     size_t n = f.write(image.data(), image.size());
     f.close();
-    if (n != image.size()) return false;
     std::vector<uint8_t> check;
-    return read_backup(name, check) && check == image;
+    if (n == image.size() && read_backup(name, check) && check == image) return true;
+    SD.remove(path.c_str());  // never leave a partial or unverified backup behind
+    return false;
 }
 
 bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
@@ -72,7 +126,13 @@ bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
     std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_READ);
     if (!f) return false;
-    out.resize(f.size());
+    // Cap before allocating: a huge file must not exhaust the heap.
+    size_t size = f.size();
+    if (size == 0 || size > kMaxFileSize) {
+        f.close();
+        return false;
+    }
+    out.resize(size);
     size_t n = f.read(out.data(), out.size());
     f.close();
     return n == out.size();

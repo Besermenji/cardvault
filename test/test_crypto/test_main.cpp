@@ -76,6 +76,26 @@ void test_kdf_rejects_bad_params() {
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{65, 3}));
 }
 
+void test_kdf_work_cap_edges() {
+    // Exactly at the cap is valid; one step over is not.
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{96, 1000}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{104, 1000}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{256, 390}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{256, 391}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{4096, 24}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{4096, 25}));
+    // Calibrated rc1-style params stay valid.
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{256, 200}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{128, 56}));  // measured on the ADV
+    // 32-bit overflow of mem * passes must not slip under the cap.
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{4096, 0xFFFFFFFFu}));
+    TEST_ASSERT_EQUAL(1000, kdf_max_passes(64));
+    TEST_ASSERT_EQUAL(781, kdf_max_passes(128));
+    TEST_ASSERT_EQUAL(390, kdf_max_passes(256));
+    TEST_ASSERT_EQUAL(24, kdf_max_passes(4096));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{4096, kdf_max_passes(4096)}));
+}
+
 void test_rng_uniform_range_and_variety() {
     int seen[10] = {0};
     for (int i = 0; i < 2000; i++) {
@@ -107,6 +127,7 @@ int main() {
     RUN_TEST(test_hmac_sha1_rfc2202);
     RUN_TEST(test_kdf_deterministic_and_salted);
     RUN_TEST(test_kdf_rejects_bad_params);
+    RUN_TEST(test_kdf_work_cap_edges);
     RUN_TEST(test_rng_uniform_range_and_variety);
     RUN_TEST(test_wiping_containers);
     return UNITY_END();

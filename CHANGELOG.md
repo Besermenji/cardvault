@@ -6,12 +6,28 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Reading an SD card no longer freezes the device when the card does not answer (#43): the mount
+  is bounded and reports "SD card not readable". The card now uses the same SPI wiring as M5's
+  Cardputer example. Backups never overwrite an older file, sort numerically past 9999, and the
+  card is released after every backup, restore or cancel.
+
 ### Changed
 - The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
   gone, so CardVault can run safely next to other firmware installed with Launcher.
 - NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
 
 ### Security
+- Vault files and SD backups are checked (header, size, padding) before any key derivation runs and
+  before memory is allocated from their size, so an oversize or malformed file costs no attempt and
+  cannot exhaust memory. The Argon2 work a file may request (memory × passes) is capped, so a crafted
+  backup cannot keep the device busy for more than about 10 s. Calibrated vaults use a small fraction
+  of that (measured ~7000 of 100000 on a Cardputer ADV).
+- Saving never deletes the current vault before the new one is in place, and a half-written new
+  version left by a power cut is no longer promoted at boot.
+- New *Compact vault* setting removes old encrypted copies from flash (it first saves a verified safety
+  copy to SD). It is offered after a passphrase change or restore, when an old copy would still open
+  with the old passphrase.
 - The wrong-passphrase counter now fails closed. If no counter is stored while a vault exists (NVS
   erased or damaged), the device allows one more attempt, after a 5-minute wait, instead of starting
   from 0; a correct unlock restores a normal counter. A counter that cannot be read refuses unlocking

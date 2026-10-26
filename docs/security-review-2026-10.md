@@ -13,7 +13,7 @@ Scope: everything under `src/`, the on-disk format and the release tooling.
 
 ## Checked, no issue found
 
-- **Crypto construction.** Fresh random 24-byte nonces for every wrap and every save (XChaCha20, so random nonces are safe). The wrap AD covers the KDF parameters and salt; the body AD covers the whole header, so swapping headers between files or downgrading parameters is detected. Argon2id with a single lane; parameters bounded (64–4096 KiB, 3–1000 passes) so a crafted header can only cause a refused unlock (refunded), not a crash.
+- **Crypto construction.** Fresh random 24-byte nonces for every wrap and every save (XChaCha20, so random nonces are safe). The wrap AD covers the KDF parameters and salt; the body AD covers the whole header, so swapping headers between files or downgrading parameters is detected. Argon2id with a single lane; parameters bounded (64–4096 KiB, 3–1000 passes, and memory × passes ≤ 100000 KiB-passes, about 9.5 s on a Cardputer ADV) so a crafted header can only cause a refused unlock (refunded), not a crash.
 - **Parsing.** Header decode checks length, magic, version and KDF bounds. The body length must be a multiple of the pad block and below the payload limit. The decrypted length prefix is bounds-checked. The TLV reader checks every read and rejects trailing bytes.
 - **Attempt guard ordering.** The counter is committed to NVS before Argon2 runs. A power cut during the check counts as a failure, and an exhausted counter found at boot triggers the wipe. Each reboot restarts the waiting delay from the full value, so rebooting doesn't skip delays.
 - **Wipe.** It erases the whole data partition, not just the file, then resets the counter.

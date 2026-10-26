@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "security/attempt_guard.h"
@@ -101,6 +102,37 @@ RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
 // only after the old vault has been overwritten.
 VaultError restore_commit(AttemptGuard& guard, VaultSession& session, BlobStore& store,
                           const std::vector<uint8_t>& image, const SString& pass);
+
+// ---- Compact ----------------------------------------------------------------
+
+// Flash keeps old ciphertext after every save (copy-on-write): earlier
+// versions, deleted entries and, after a passphrase change or restore, a
+// header that an old passphrase still opens. Compacting erases the whole
+// partition and writes the open vault back, so only the current image remains.
+enum class CompactResult {
+    Done,
+    NotOpen,        // nothing in memory to write back; storage untouched
+    SealFailed,     // could not build the image; storage untouched
+    NoSafetyCopy,   // the safety copy could not be stored; storage untouched
+    StorageFailed,  // erase or write failed: flash may no longer hold the vault,
+                    // which lives only in this session until a save succeeds
+};
+
+// Stores the exact image somewhere durable (an SD backup) before flash is
+// erased, so a power cut during the erase cannot lose the vault.
+using SafetyCopy = std::function<bool(const std::vector<uint8_t>& image)>;
+
+// Never touches the attempt counter. `safety_copy` runs first and must
+// succeed; pass none only to retry after StorageFailed, when a copy was
+// already taken. On StorageFailed the session stays open and `flash_missing`
+// is set: see persist_before_lock.
+CompactResult compact_vault(const VaultSession& session, BlobStore& store,
+                            const SafetyCopy& safety_copy, bool& flash_missing);
+
+// Called before anything closes the session (manual lock, auto-lock). While
+// `flash_missing` is set the open session is the only copy of the vault: it
+// tries to save it again and returns false (do not lock) if that fails.
+bool persist_before_lock(VaultSession& session, BlobStore& store, bool& flash_missing);
 
 // ---- Locking ----------------------------------------------------------------
 

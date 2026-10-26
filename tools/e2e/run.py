@@ -2,7 +2,12 @@
 """End-to-end tests: drive CardVault's real UI on a Cardputer over USB.
 
   pio run -e cardputer-e2e -t upload
-  python3 tools/e2e/run.py /dev/cu.usbmodem1101 [-k name_filter]
+  python3 tools/e2e/run.py /dev/cu.usbmodem1101 [-k name_filter] [--sd]
+
+Without --sd the device must have NO SD card: the SD scenarios then check
+the "No SD card" paths. With --sd a FAT32 card must be inserted: backup,
+restore (also from the setup screen, #43) and Compact run against it, and
+leave backup-*.cvb files in /cardvault on the card.
 
 The e2e firmware keeps its vault at 0x410000 and uses separate NVS
 namespaces, so a real vault on the device is never touched. Requires
@@ -22,10 +27,16 @@ import serial
 
 P1 = "correct horse 42"
 P2 = "battery staple 77"
+P3 = "backup phrase 99"
+SD_CARD = False  # set by --sd
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
 
 class Fail(Exception):
+    pass
+
+
+class Skip(Exception):
     pass
 
 
@@ -206,6 +217,30 @@ def new_entry(d, type_label):
 def save_entry(d):
     d.key("tab")  # TAB only moves to the Save row
     d.key("enter")
+
+
+# Settings rows (0-based)
+ROW_BACKUP, ROW_RESTORE, ROW_COMPACT = 4, 5, 7
+
+
+def open_setting(d, row):
+    go_home(d)
+    d.key("tab")
+    d.menu_pick("Settings")
+    d.screen("settings")
+    d.key("down", row)
+    d.key("enter")
+
+
+def backup_name_in(st):
+    m = re.search(r"backup-\d+\.cvb", info(st).get("msg", ""))
+    check(m is not None, f"no backup file name in: {st}")
+    return m.group(0)
+
+
+def need_card():
+    if not SD_CARD:
+        raise Skip("needs --sd and a FAT32 card in the device")
 
 
 def set_title(d, title):
@@ -483,8 +518,11 @@ def t14_change_passphrase(d):
     d.key("enter")
     d.type(P2)
     d.key("enter")
-    d.screen("message", "Passphrase changed", timeout=40)
-    d.key("enter")
+    # Success offers to compact (old copies still open with the old passphrase).
+    st = d.screen("confirm", "Passphrase changed", timeout=40)
+    check("OLD passphrase" in st.get("info", ""), f"compact offer missing: {st}")
+    d.key("n")  # compacting is covered on its own (needs an SD card)
+    d.screen("settings")
     d.cmd("g0")
     d.screen("unlock")
     d.type(P1)
@@ -647,6 +685,128 @@ def t18_tab_never_saves(d):
     d.unlock(P1)
 
 
+def t19_sd_without_card(d):
+    if SD_CARD:
+        raise Skip("card inserted (--sd)")
+    before = d.dump()
+    open_setting(d, ROW_BACKUP)
+    d.screen("message", "No SD card", timeout=15)
+    d.key("enter")
+    open_setting(d, ROW_RESTORE)
+    d.screen("message", "No SD card", timeout=15)
+    d.key("enter")
+    # Compact needs its SD safety copy first: without a card nothing changes.
+    open_setting(d, ROW_COMPACT)
+    d.screen("confirm", "Compact vault")
+    d.key("y")
+    st = d.screen("message", "Compact vault", timeout=15)
+    check("Nothing was changed" in info(st)["msg"], f"compact without card: {st}")
+    d.key("enter")
+    check(d.dump() == before, "vault changed by a refused compact")
+    d.cmd("g0")  # flash still holds the vault, so locking is allowed
+    d.screen("unlock")
+    d.unlock(P1)
+
+
+def t20_sd_backup_and_restore(d):
+    need_card()
+    before = d.dump()
+    open_setting(d, ROW_BACKUP)
+    d.screen("text_input", "Backup passphrase", timeout=15)
+    d.type(P3)
+    d.key("enter")
+    d.screen("text_input", "Confirm passphrase")
+    d.type(P3)
+    d.key("enter")
+    st = d.screen("message", "Backup saved", timeout=60)
+    name = backup_name_in(st)
+    d.key("enter")
+
+    # Change the vault so the restore is observable.
+    new_entry(d, "Note")
+    set_title(d, "After backup")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("temp")
+    d.key("tab")
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    check(len(d.dump()) == len(before) + 1, "note not added")
+
+    # Restore while unlocked: newest backup first, wrong passphrase not counted.
+    open_setting(d, ROW_RESTORE)
+    st = d.screen("menu", "Choose backup", timeout=15)
+    check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
+    d.key("enter")
+    d.screen("text_input", "Backup passphrase")
+    d.type("not the backup pass")
+    d.key("enter")
+    st = d.screen("message", "Restore failed", timeout=30)
+    check(st["fails"] == 0, f"unlocked restore guess must not count: {st}")
+    d.key("enter")
+    d.screen("settings")  # picking a backup closed the list
+    d.key("enter")  # Restore from SD again (row still selected)
+    d.screen("menu", "Choose backup", timeout=15)
+    d.key("enter")
+    d.screen("text_input", "Backup passphrase")
+    d.type(P3)
+    d.key("enter")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("y")
+    d.screen("confirm", "Restored", timeout=30)  # offers to compact
+    d.key("n")
+    d.screen("home")
+    check(d.dump() == before, "restore did not bring back the backed-up vault")
+    d.lock()
+    d.unlock(P3)  # the restored vault opens with the backup passphrase
+
+    # #43: TAB on the setup screen reads the card (this used to hang).
+    d.restart_cmd("factory")
+    d.screen("setup")
+    d.key("tab")
+    st = d.screen("menu", "Choose backup", timeout=15)
+    check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
+    d.key("enter")
+    d.screen("text_input", "Backup passphrase")
+    d.type(P3)
+    d.key("enter")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("y")
+    d.screen("confirm", "Restored", timeout=30)
+    d.key("n")
+    st = d.screen("home")
+    check(d.dump() == before and st["fails"] == 0, f"restore on setup failed: {st}")
+
+
+def t21_sd_compact_with_safety_copy(d):
+    need_card()
+    before = d.dump()
+    open_setting(d, ROW_COMPACT)
+    d.screen("confirm", "Compact vault")
+    d.key("y")
+    st = d.screen("message", "Compact vault", timeout=60)
+    check("opens with your vault passphrase" in info(st)["msg"], f"compact failed: {st}")
+    copy = backup_name_in(st)
+    d.key("enter")
+    d.restart_cmd("reboot")
+    d.unlock(P3)
+    check(d.dump() == before, "vault changed by compact")
+    # The safety copy is the newest backup and opens with the vault passphrase.
+    open_setting(d, ROW_RESTORE)
+    st = d.screen("menu", "Choose backup", timeout=15)
+    check(info(st)["items"].split("|")[0] == copy, f"safety copy not newest: {st}")
+    d.key("enter")
+    d.screen("text_input", "Backup passphrase")
+    d.type(P3)
+    d.key("enter")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("n")  # verified; no need to replace
+    d.screen("settings")
+    go_home(d)
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 
@@ -654,9 +814,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("port")
     ap.add_argument("-k", default="", help="only run scenarios whose name contains this")
+    ap.add_argument("--sd", action="store_true", help="a FAT32 SD card is inserted")
     args = ap.parse_args()
+    global SD_CARD
+    SD_CARD = args.sd
     d = Device(args.port)
-    passed = failed = 0
+    passed = failed = skipped = 0
     for fn in SCENARIOS:
         if args.k and args.k not in fn.__name__:
             continue
@@ -665,6 +828,9 @@ def main():
             fn(d)
             passed += 1
             print(f"PASS {fn.__name__} ({time.time() - t0:.1f}s)", flush=True)
+        except Skip as e:
+            skipped += 1
+            print(f"SKIP {fn.__name__}: {e}", flush=True)
         except Exception as e:
             failed += 1
             print(f"FAIL {fn.__name__}: {e}", flush=True)
@@ -673,7 +839,7 @@ def main():
             if not args.k:
                 print("stopping: later scenarios depend on earlier ones")
                 break
-    print(f"\n{passed} passed, {failed} failed")
+    print(f"\n{passed} passed, {failed} failed, {skipped} skipped")
     sys.exit(1 if failed else 0)
 
 
