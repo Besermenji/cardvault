@@ -164,7 +164,10 @@ void lock_session(ui::Router& router, VaultSession& session, ui::ScreenPtr unloc
 
 AutolockAction autolock_step(bool unlocked, bool dimmed, uint32_t idle_ms, uint32_t limit_ms,
                              uint32_t dim_before_ms) {
-    if (!unlocked) return dimmed ? AutolockAction::Wake : AutolockAction::None;
+    if (!unlocked) {
+        if (idle_ms >= limit_ms) return dimmed ? AutolockAction::None : AutolockAction::Clear;
+        return dimmed ? AutolockAction::Wake : AutolockAction::None;
+    }
     if (idle_ms >= limit_ms) return AutolockAction::Lock;
     if (!dimmed && idle_ms + dim_before_ms >= limit_ms) return AutolockAction::Dim;
     return AutolockAction::None;

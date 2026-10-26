@@ -227,6 +227,25 @@ void test_router_clear_now_destroys_everything_and_drops_pending() {
     TEST_ASSERT_EQUAL(3, deletions);  // both stacked screens + the never-pushed one
 }
 
+void test_router_pop_to_root_keeps_only_the_base_screen() {
+    Router r;
+    r.push(fake("base"));
+    r.push(fake("input"));
+    r.push(fake("confirm"));
+    r.apply();
+    r.push(fake("pending"));
+    g_log.clear();
+    r.pop_to_root();
+    TEST_ASSERT_EQUAL(1, r.depth());
+    TEST_ASSERT_EQUAL(0, r.pending());
+    TEST_ASSERT_EQUAL_STRING("base", r.top()->name());
+    int deletions = 0;
+    for (auto& l : g_log) deletions += l.rfind("del ", 0) == 0;
+    TEST_ASSERT_EQUAL(3, deletions);  // two stacked screens + the never-pushed one
+    r.pop_to_root();  // already at the root: nothing happens
+    TEST_ASSERT_EQUAL(1, r.depth());
+}
+
 // ---- Wipe -------------------------------------------------------------------
 
 namespace {
@@ -991,8 +1010,13 @@ void test_lock_destroys_all_screens_and_wipes_session() {
 
 void test_autolock_step() {
     const uint32_t limit = 60000, dim = 10000;
-    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, false, 999999, limit, dim)));
+    // Locked screens: nothing until idle for the limit, then clear once and stay dim.
+    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, false, 59999, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Clear), int(autolock_step(false, false, 60000, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Clear), int(autolock_step(false, false, 999999, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, true, 60000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Wake), int(autolock_step(false, true, 0, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Wake), int(autolock_step(false, true, 59999, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(true, false, 49999, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Dim), int(autolock_step(true, false, 50000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(true, true, 55000, limit, dim)));
@@ -1012,6 +1036,7 @@ int main() {
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
+    RUN_TEST(test_router_pop_to_root_keeps_only_the_base_screen);
     RUN_TEST(test_boot_route);
     RUN_TEST(test_boot_route_without_counter_storage_blocks_everything);
     RUN_TEST(test_wipe_success_clears_vault_and_counter);

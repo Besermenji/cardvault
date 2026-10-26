@@ -57,6 +57,12 @@ public:
         ops_.clear();
         stack_.clear();
     }
+    // Destroys every screen above the first one (and pending operations):
+    // dropping typed input and open prompts while keeping the base screen.
+    void pop_to_root() {
+        ops_.clear();
+        if (stack_.size() > 1) stack_.erase(stack_.begin() + 1, stack_.end());
+    }
     Screen* top() { return stack_.empty() ? nullptr : stack_.back().get(); }
     size_t depth() const { return stack_.size(); }
     size_t pending() const { return ops_.size(); }

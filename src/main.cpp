@@ -48,13 +48,21 @@ void handle_autolock(App& a, uint32_t now) {
             // Whatever was revealed (also on screens underneath) is hidden again.
             for (size_t i = 0; i < a.router.depth(); i++) a.router.at(i)->conceal();
             break;
+        case AutolockAction::Clear:
+            // Locked and idle: forget typed passphrases and open prompts.
+            a.router.pop_to_root();
+            if (Screen* t = a.router.top()) t->conceal();
+            drop_pending_keys();
+            a.dimmed = true;
+            M5Cardputer.Display.setBrightness(8);
+            break;
         case AutolockAction::Lock:
             a.dimmed = false;
             a.apply_brightness();
-            if (a.lock_now())
-                a.toast("Locked (idle)", color::accent);
-            else
-                a.last_input_ms = now;  // retry after another idle period
+            // The lock screen starts a fresh idle period: it must not clear and
+            // dim at once, and the toast stays readable.
+            a.last_input_ms = now;
+            if (a.lock_now()) a.toast("Locked (idle)", color::accent);
             break;
     }
 }
@@ -151,7 +159,10 @@ void loop() {
     bool g0 = M5Cardputer.BtnA.wasPressed();
 #endif
     // G0 side button: instant lock.
-    if (g0 && a.session.is_open() && a.lock_now()) a.toast("Locked", color::accent);
+    if (g0 && a.session.is_open() && a.lock_now()) {
+        a.last_input_ms = now;
+        a.toast("Locked", color::accent);
+    }
 
     Key k;
     while (poll_key(k)) {
