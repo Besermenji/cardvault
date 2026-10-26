@@ -15,8 +15,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The 8-128 character passphrase policy is now enforced in the vault core (create, change passphrase,
   backup), not only in the UI; an empty passphrase is never accepted for unlock or restore. Vaults and
   backups made earlier with a shorter passphrase still open.
-- The strength meter no longer rates repeats, runs, keyboard walks or plain lowercase phrases as strong,
-  and credits 11 bits per word for generated BIP39 passphrases.
+- The strength meter no longer rates repeats, runs, keyboard walks or word-like prose (lowercase words,
+  however separated, capitalised or suffixed with digits) above "fair". Text made only of BIP39 words
+  gets 11 bits per distinct word, which assumes they were generated; hand-picked BIP39 words are
+  overrated.
 - Restoring an SD backup while locked could reset the wrong-passphrase counter without replacing
   the vault, allowing unlimited guesses. The counter now resets only after a restore completes.
 - Vault entries are deserialized in place so short secrets are not left in stack temporaries.

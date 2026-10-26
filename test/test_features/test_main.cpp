@@ -145,8 +145,14 @@ void test_pwgen_words_and_strength() {
     TEST_ASSERT_TRUE(passphrase_strength_bits("qwertyuiop") < 40);
     TEST_ASSERT_TRUE(passphrase_strength_bits("abcdefghij") < 40);
     TEST_ASSERT_TRUE(passphrase_strength_bits("zxcvbnm,./") < 40);
-    // Lowercase prose is capped at "fair".
+    // Case does not hide repeats or runs.
+    TEST_ASSERT_TRUE(passphrase_strength_bits("aBcDeFgHiJkL") < 40);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("AaAaAaAaAaAa") < 40);
+    // Word-like prose is capped at "fair", however it is separated or decorated.
     TEST_ASSERT_TRUE(passphrase_strength_bits("the quick brown fox jumps over") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("the-quick-brown-fox-jumps-over-the-lazy-dog") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("thequickbrownfoxjumps1") <= 50);
+    TEST_ASSERT_TRUE(passphrase_strength_bits("The Quick Brown Fox Jumps 2024!") <= 50);
     // Generated words get 11 bits per distinct word, joined by '-' or ' '.
     TEST_ASSERT_EQUAL_FLOAT(66.0, passphrase_strength_bits("zoo-wrap-cable-ghost-lemon-tiger"));
     TEST_ASSERT_EQUAL_FLOAT(66.0, passphrase_strength_bits("zoo wrap cable ghost lemon tiger"));

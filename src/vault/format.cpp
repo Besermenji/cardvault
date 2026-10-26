@@ -31,7 +31,8 @@ const char* vault_error_str(VaultError e) {
         case VaultError::OutOfMemory: return "Out of memory";
         case VaultError::Io: return "Storage error";
         case VaultError::NotOpen: return "Vault locked";
-        case VaultError::WeakPassphrase: return "Passphrase must be 8-128 characters";
+        case VaultError::EmptyPassphrase: return "Passphrase is empty";
+        case VaultError::WeakPassphrase: return "Use 8-128 characters, not only spaces";
     }
     return "Unknown error";
 }

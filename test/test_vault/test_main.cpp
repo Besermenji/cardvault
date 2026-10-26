@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "crypto/rng.h"
 #include "vault/serializer.h"
 #include "vault/session.h"
 
@@ -205,19 +206,43 @@ void test_passphrase_policy() {
     }
 }
 
+// A vault image sealed the way create() did before the policy existed, so it
+// can carry a passphrase shorter than 8 characters.
+static std::vector<uint8_t> legacy_image(const char* pass) {
+    Header h;
+    h.kdf = kFast;
+    header_new_salt(h);
+    uint8_t kek[32], dek[32];
+    TEST_ASSERT_TRUE(kdf_derive(kek, reinterpret_cast<const uint8_t*>(pass), strlen(pass), h.salt,
+                                h.kdf));
+    rng_fill(dek, 32);
+    header_wrap(h, kek, dek);
+    VaultData d;
+    d.add(make_entry(EntryType::Note, "old vault"));
+    SBytes payload;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(serialize(d, payload)));
+    std::vector<uint8_t> out;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok),
+                      int(seal_file(h, dek, payload.data(), payload.size(), out)));
+    return out;
+}
+
 void test_unlock_empty_and_legacy_short_passphrases() {
+    // Vaults and backups made before the policy still open with their own
+    // short passphrase, from flash and from an image.
     MemoryStore store;
+    store.write(legacy_image("pw"));
     VaultSession s;
-    s.create(store, "right-passphrase", kFast);
-    std::vector<uint8_t> image;
-    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.export_image("backup pass", kFast, image)));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock(store, "pw")));
+    TEST_ASSERT_EQUAL_STRING("old vault", s.data().entries[0].title.c_str());
     s.close();
-    // Empty is refused outright; a short non-empty guess is just wrong, so
-    // vaults and backups made before the policy still open with their own
-    // (possibly short) passphrase.
-    TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase), int(s.unlock_bytes(image, "")));
-    TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase), int(s.unlock(store, "")));
-    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock_bytes(image, "short")));
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(s.unlock_bytes(store.blob, "pw")));
+    s.close();
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(s.unlock(store, "pz")));
+    // Empty is refused outright, with its own error.
+    TEST_ASSERT_EQUAL(int(VaultError::EmptyPassphrase), int(s.unlock_bytes(store.blob, "")));
+    TEST_ASSERT_EQUAL(int(VaultError::EmptyPassphrase), int(s.unlock(store, "")));
+    TEST_ASSERT_FALSE(s.is_open());
 }
 
 void test_too_large_rejected() {

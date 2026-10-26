@@ -61,7 +61,7 @@ VaultError VaultSession::unlock(BlobStore& store, const SString& pass) {
 
 VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SString& pass) {
     close();
-    if (pass.empty()) return VaultError::WeakPassphrase;
+    if (pass.empty()) return VaultError::EmptyPassphrase;
     Header h;
     VaultError e = Header::decode(file.data(), file.size(), h);
     if (e != VaultError::Ok) return e;

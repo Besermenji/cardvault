@@ -388,16 +388,6 @@ void test_restore_commit_io_error_keeps_counter() {
     TEST_ASSERT_FALSE(f.session.is_open());
 }
 
-// ---- Passphrase policy ------------------------------------------------------
-
-void test_create_refuses_weak_passphrase() {
-    MemoryStore store;
-    VaultSession session;
-    TEST_ASSERT_EQUAL(int(VaultError::WeakPassphrase), int(session.create(store, "1234567", kFast)));
-    TEST_ASSERT_FALSE(session.is_open());
-    TEST_ASSERT_TRUE(store.blob.empty());
-}
-
 // ---- Locking ----------------------------------------------------------------
 
 void test_lock_destroys_all_screens_and_wipes_session() {
@@ -439,7 +429,6 @@ void test_autolock_step() {
 
 int main() {
     UNITY_BEGIN();
-    RUN_TEST(test_create_refuses_weak_passphrase);
     RUN_TEST(test_router_ops_are_deferred_until_apply);
     RUN_TEST(test_router_push_pop_replace_reset);
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);

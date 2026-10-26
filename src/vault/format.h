@@ -44,7 +44,8 @@ enum class VaultError {
     OutOfMemory,
     Io,
     NotOpen,
-    WeakPassphrase,
+    WeakPassphrase,   // new passphrase breaks the policy
+    EmptyPassphrase,  // unlock with nothing typed
 };
 
 const char* vault_error_str(VaultError e);
