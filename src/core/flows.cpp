@@ -4,9 +4,16 @@ namespace cv {
 
 BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, bool vault_exists) {
     if (!has_partition) return BootRoute::NoPartition;
-    if (!mounted) return BootRoute::StorageUnreadable;
     if (guard_exhausted) return BootRoute::Wipe;
+    if (!mounted) return BootRoute::StorageUnreadable;
     return vault_exists ? BootRoute::Unlock : BootRoute::Setup;
+}
+
+bool wipe_vault(BlobStore& store, AttemptGuard& guard) {
+    guard.mark_exhausted();  // best effort: the erase must run even if NVS fails
+    if (!store.erase()) return false;
+    guard.reset();
+    return true;
 }
 
 UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStore& store,

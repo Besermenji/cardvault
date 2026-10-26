@@ -60,6 +60,17 @@ void test_refund_undoes_one_attempt() {
     TEST_ASSERT_EQUAL(1, g.failures());
 }
 
+void test_mark_exhausted_persists_exhausted_state() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    TEST_ASSERT_TRUE(g.mark_exhausted());
+    TEST_ASSERT_TRUE(g.exhausted());
+    TEST_ASSERT_EQUAL(0, g.remaining());
+    TEST_ASSERT_FALSE(g.begin_attempt());
+    kv.fail_writes = true;
+    TEST_ASSERT_FALSE(g.reset());
+}
+
 void test_gate_waits_until_armed_delay_passes() {
     AttemptGate gate;
     TEST_ASSERT_EQUAL(0, gate.wait_ms(1234));
@@ -82,5 +93,6 @@ int main() {
     RUN_TEST(test_refuses_when_counter_cannot_persist);
     RUN_TEST(test_refund_undoes_one_attempt);
     RUN_TEST(test_gate_waits_until_armed_delay_passes);
+    RUN_TEST(test_mark_exhausted_persists_exhausted_state);
     return UNITY_END();
 }

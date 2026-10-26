@@ -34,7 +34,10 @@ public:
     // Undo begin_attempt() when the check could not run for reasons unrelated
     // to the passphrase (out of memory, storage error).
     void refund();
-    void reset();
+    // Persist the exhausted state (used to record the intent to wipe before
+    // anything is destroyed).
+    bool mark_exhausted();
+    bool reset();
 
 private:
     KvStore& kv_;

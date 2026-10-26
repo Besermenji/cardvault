@@ -38,8 +38,18 @@ void App::wipe_and_reboot(const char* reason) {
         dialog(*canvas, "Erasing vault", reason, color::bad);
         canvas->pushSprite(0, 0);
     }
-    store.erase();
-    guard.reset();
+    if (!wipe_vault(store, guard)) {
+        // The counter stays exhausted, so every boot retries the wipe. Stop
+        // here instead of rebooting in a loop.
+        if (canvas) {
+            clear(*canvas);
+            dialog(*canvas, "Erase failed", "Power the device off and on to retry.", color::bad);
+            canvas->pushSprite(0, 0);
+        }
+        for (;;) {
+            delay(1000);
+        }
+    }
     delay(2500);
     ESP.restart();
     for (;;) {

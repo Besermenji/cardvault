@@ -32,6 +32,8 @@ void AttemptGuard::refund() {
     if (f > 0) kv_.set_u32(kKey, f - 1);
 }
 
-void AttemptGuard::reset() { kv_.set_u32(kKey, 0); }
+bool AttemptGuard::mark_exhausted() { return kv_.set_u32(kKey, kMaxAttempts); }
+
+bool AttemptGuard::reset() { return kv_.set_u32(kKey, 0); }
 
 }  // namespace cv

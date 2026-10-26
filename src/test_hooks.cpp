@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "core/flows.h"
+
 namespace cv {
 namespace test {
 
@@ -150,8 +152,7 @@ void handle(ui::App& a, const std::string& line) {
         Serial.flush();
         a.router.clear_now();
         a.session.close();
-        a.store.erase();
-        a.guard.reset();
+        wipe_vault(a.store, a.guard);
         device::save_settings(Settings());
         delay(50);
         ESP.restart();

@@ -103,8 +103,9 @@ void setup() {
                                         color::warn));
             break;
         case BootRoute::Wipe:
-            // Power was cut between the last failed attempt and the wipe.
-            a.wipe_and_reboot("Too many wrong passphrases.");
+            // A wipe was started (too many wrong passphrases, or an erase on
+            // request) but did not finish, e.g. power was cut.
+            a.wipe_and_reboot("Finishing an interrupted erase.");
         case BootRoute::Unlock: a.router.reset(make_unlock()); break;
         case BootRoute::Setup: a.router.reset(make_setup()); break;
     }

@@ -131,12 +131,73 @@ void test_router_clear_now_destroys_everything_and_drops_pending() {
     TEST_ASSERT_EQUAL(3, deletions);  // both stacked screens + the never-pushed one
 }
 
+// ---- Wipe -------------------------------------------------------------------
+
+namespace {
+struct SpyStore : MemoryStore {
+    bool fail_erase = false;
+    MemoryKv* kv = nullptr;
+    uint32_t failures_at_erase = 0;
+    bool erase_called = false;
+    bool erase() override {
+        erase_called = true;
+        uint32_t v = 0;
+        if (kv) kv->get_u32("fails", v);
+        failures_at_erase = v;
+        if (fail_erase) return false;
+        return MemoryStore::erase();
+    }
+};
+}  // namespace
+
+void test_wipe_success_clears_vault_and_counter() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    SpyStore s;
+    s.kv = &kv;
+    s.write({1, 2, 3});
+    g.begin_attempt();
+    TEST_ASSERT_TRUE(wipe_vault(s, g));
+    TEST_ASSERT_FALSE(s.exists());
+    TEST_ASSERT_EQUAL(0, g.failures());
+    // The intent to wipe was persisted before anything was destroyed.
+    TEST_ASSERT_EQUAL(kMaxAttempts, s.failures_at_erase);
+}
+
+void test_wipe_failure_keeps_counter_exhausted() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    SpyStore s;
+    s.kv = &kv;
+    s.fail_erase = true;
+    s.write({1, 2, 3});
+    TEST_ASSERT_FALSE(wipe_vault(s, g));
+    TEST_ASSERT_TRUE(s.exists());
+    TEST_ASSERT_TRUE(g.exhausted());
+    // The next boot retries the wipe, even if the partition is unmountable.
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, g.exhausted(), true)));
+}
+
+void test_wipe_runs_even_if_counter_cannot_persist() {
+    MemoryKv kv;
+    kv.fail_writes = true;
+    AttemptGuard g(kv);
+    SpyStore s;
+    s.write({1, 2, 3});
+    TEST_ASSERT_TRUE(wipe_vault(s, g));
+    TEST_ASSERT_TRUE(s.erase_called);
+    TEST_ASSERT_FALSE(s.exists());
+}
+
 // ---- Boot route -------------------------------------------------------------
 
 void test_boot_route() {
     TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, false, false, false)));
     TEST_ASSERT_EQUAL(int(BootRoute::StorageUnreadable), int(boot_route(true, false, false, false)));
-    TEST_ASSERT_EQUAL(int(BootRoute::StorageUnreadable), int(boot_route(true, false, true, true)));
+    // An exhausted counter beats an unmountable partition: finish the wipe.
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, true, true)));
+    TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, true, false)));
+    TEST_ASSERT_EQUAL(int(BootRoute::NoPartition), int(boot_route(false, false, true, false)));
     TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, true)));
     TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, true, true, false)));
     TEST_ASSERT_EQUAL(int(BootRoute::Unlock), int(boot_route(true, true, false, true)));
@@ -435,6 +496,9 @@ int main() {
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
     RUN_TEST(test_boot_route);
+    RUN_TEST(test_wipe_success_clears_vault_and_counter);
+    RUN_TEST(test_wipe_failure_keeps_counter_exhausted);
+    RUN_TEST(test_wipe_runs_even_if_counter_cannot_persist);
     RUN_TEST(test_unlock_success_resets_counter);
     RUN_TEST(test_unlock_wrong_counts_and_reports_delay);
     RUN_TEST(test_unlock_counter_persisted_before_check);

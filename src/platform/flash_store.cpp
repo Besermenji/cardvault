@@ -89,8 +89,9 @@ bool FlashStore::erase() {
     if (mounted_) LittleFS.end();
     mounted_ = false;
     bool ok = esp_partition_erase_range(p, 0, p->size) == ESP_OK;
+    // Remount result is reported separately through mounted().
     mounted_ = LittleFS.begin(true, "/vault", 4, label);
-    return ok && mounted_;
+    return ok;
 }
 
 }  // namespace cv
