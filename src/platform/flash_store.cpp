@@ -3,6 +3,8 @@
 #include <LittleFS.h>
 #include <esp_partition.h>
 
+#include "vault/format.h"
+
 namespace cv {
 
 namespace {
@@ -21,7 +23,13 @@ const esp_partition_t* find_partition(const char*& label) {
 bool read_file(const char* path, std::vector<uint8_t>& out) {
     File f = LittleFS.open(path, "r");
     if (!f) return false;
-    out.resize(f.size());
+    // Cap before allocating: a damaged or foreign file must not exhaust the heap.
+    size_t size = f.size();
+    if (size == 0 || size > kMaxFileSize) {
+        f.close();
+        return false;
+    }
+    out.resize(size);
     size_t n = f.read(out.data(), out.size());
     f.close();
     return n == out.size();
@@ -48,9 +56,14 @@ bool FlashStore::begin() {
     if (!p) return false;
     mounted_ = LittleFS.begin(false, "/vault", 4, label_);
     if (!mounted_ && partition_blank(p)) mounted_ = LittleFS.begin(true, "/vault", 4, label_);
-    if (mounted_ && !LittleFS.exists(kFile) && LittleFS.exists(kTmp)) {
-        // Crash between writing the temp file and renaming it: finish the job.
-        LittleFS.rename(kTmp, kFile);
+    if (mounted_ && LittleFS.exists(kTmp)) {
+        // Crash between writing the temp file and renaming it. Finish the job
+        // only when there is no vault and the temp file is a complete, well-formed
+        // image; anything else is leftover ciphertext and is deleted.
+        std::vector<uint8_t> tmp;
+        bool usable = !LittleFS.exists(kFile) && read_file(kTmp, tmp) &&
+                      check_layout(tmp.data(), tmp.size()) == VaultError::Ok;
+        if (!usable || !LittleFS.rename(kTmp, kFile)) LittleFS.remove(kTmp);
     }
     return mounted_;
 }
@@ -76,10 +89,11 @@ bool FlashStore::write(const std::vector<uint8_t>& data) {
         LittleFS.remove(kTmp);
         return false;
     }
+    // LittleFS renames atomically over an existing file. If it refuses, the
+    // current vault stays as it is: never delete it first.
     if (LittleFS.rename(kTmp, kFile)) return true;
-    // Fallback for VFS layers that refuse to rename over an existing file.
-    LittleFS.remove(kFile);
-    return LittleFS.rename(kTmp, kFile);
+    LittleFS.remove(kTmp);
+    return false;
 }
 
 bool FlashStore::erase() {

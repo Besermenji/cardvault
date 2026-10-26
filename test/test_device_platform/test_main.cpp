@@ -100,23 +100,66 @@ void test_persists_across_remount() {
     TEST_ASSERT_TRUE(out == data);
 }
 
+static std::vector<uint8_t> sealed_image(const char* pass = "device test pass") {
+    MemoryStore m;
+    VaultSession v;
+    v.create(m, pass, KdfParams{64, 3});
+    std::vector<uint8_t> img;
+    m.read(img);
+    return img;
+}
+
+static void put_raw(const char* path, const std::vector<uint8_t>& data) {
+    File f = LittleFS.open(path, "w");
+    TEST_ASSERT_TRUE(bool(f));
+    f.write(data.data(), data.size());
+    f.close();
+}
+
 void test_crash_before_rename_is_recovered() {
     erase_vault_partition();
     FlashStore s;
     TEST_ASSERT_TRUE(s.begin());
     // Simulate: new file fully written to vault.tmp, power lost before the
     // rename, and no previous vault.bin.
-    File f = LittleFS.open("/vault.tmp", "w");
-    f.write(reinterpret_cast<const uint8_t*>("NEWDATA"), 7);
-    f.close();
+    auto img = sealed_image();
+    put_raw("/vault.tmp", img);
     LittleFS.end();
     FlashStore after;
     TEST_ASSERT_TRUE(after.begin());
     TEST_ASSERT_TRUE(after.exists());
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
     std::vector<uint8_t> out;
-    after.read(out);
-    TEST_ASSERT_EQUAL(7, out.size());
-    TEST_ASSERT_EQUAL_MEMORY("NEWDATA", out.data(), 7);
+    TEST_ASSERT_TRUE(after.read(out));
+    TEST_ASSERT_TRUE(out == img);
+}
+
+void test_truncated_tmp_is_deleted_not_promoted() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    auto img = sealed_image();
+    img.resize(img.size() / 2);  // power cut mid-write
+    put_raw("/vault.tmp", img);
+    LittleFS.end();
+    FlashStore after;
+    TEST_ASSERT_TRUE(after.begin());
+    TEST_ASSERT_FALSE(after.exists());  // stays on the Setup route
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
+}
+
+void test_oversize_vault_is_refused_before_allocating() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    std::vector<uint8_t> big(kMaxFileSize + 1, 0x5A), out;
+    put_raw("/vault.bin", big);
+    TEST_ASSERT_TRUE(s.exists());
+    TEST_ASSERT_FALSE(s.read(out));
+    TEST_ASSERT_EQUAL(0, out.size());
+    std::vector<uint8_t> empty;
+    put_raw("/vault.bin", empty);
+    TEST_ASSERT_FALSE(s.read(out));
 }
 
 void test_stale_tmp_does_not_replace_good_vault() {
@@ -134,6 +177,8 @@ void test_stale_tmp_does_not_replace_good_vault() {
     TEST_ASSERT_TRUE(after.begin());
     TEST_ASSERT_TRUE(after.read(out));
     TEST_ASSERT_TRUE(out == good);
+    // A leftover tmp next to a vault is old ciphertext: it is deleted at boot.
+    TEST_ASSERT_FALSE(LittleFS.exists("/vault.tmp"));
     // The next save still works and replaces the stale temp file.
     std::vector<uint8_t> next(200, 2);
     TEST_ASSERT_TRUE(after.write(next));
@@ -311,6 +356,8 @@ void setup() {
         RUN_TEST(test_write_read_overwrite_roundtrip);
         RUN_TEST(test_persists_across_remount);
         RUN_TEST(test_crash_before_rename_is_recovered);
+        RUN_TEST(test_truncated_tmp_is_deleted_not_promoted);
+        RUN_TEST(test_oversize_vault_is_refused_before_allocating);
         RUN_TEST(test_stale_tmp_does_not_replace_good_vault);
         RUN_TEST(test_erase_destroys_everything);
         RUN_TEST(test_nvs_guard_persists_across_instances);
