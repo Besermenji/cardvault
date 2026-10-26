@@ -212,6 +212,14 @@ private:
 // missing counter would otherwise allow a single guess.
 bool restore_guarded() { return !app().session.is_open() && app().store.exists(); }
 
+// A card that was present but stalled the driver is not "no card".
+void show_no_card(const char* hint) {
+    if (sd::wedged())
+        app().router.push(make_message(msg::kSdStalledTitle, msg::kSdStalled, color::bad));
+    else
+        app().router.push(make_message("No SD card", hint, color::warn));
+}
+
 void restore_from(const std::string& name) {
     auto image = std::make_shared<std::vector<uint8_t>>();
     bool read_ok = sd::read_backup(name, *image);
@@ -281,8 +289,7 @@ void start_backup_flow() {
     if (!app().session.is_open()) return;
     app().busy("Checking SD card...");
     if (!sd::mount()) {
-        app().router.push(make_message("No SD card", "Insert a FAT32 microSD card and try again.",
-                                       color::warn));
+        show_no_card("Insert a FAT32 microSD card and try again.");
         return;
     }
     sd::unmount();  // only probed: the passphrase prompt can be cancelled
@@ -314,8 +321,7 @@ void start_backup_flow() {
 void start_restore_flow() {
     app().busy("Reading SD card...");
     if (!sd::mount()) {
-        app().router.push(make_message("No SD card", "Insert the microSD card with your backup.",
-                                       color::warn));
+        show_no_card("Insert the microSD card with your backup.");
         return;
     }
     auto names = sd::list_backups();

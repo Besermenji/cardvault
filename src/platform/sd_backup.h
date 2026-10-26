@@ -9,7 +9,11 @@ namespace cv {
 
 namespace sd {
 
+// Mounts the card. Never blocks longer than kMountTimeoutMs: if the driver
+// stalls (seen with some cards, #43) it returns false and wedged() is true;
+// later calls then fail at once until the device restarts.
 bool mount();
+bool wedged();
 void unmount();
 // Writes a new numbered backup file; returns its name in `name`.
 bool write_backup(const std::vector<uint8_t>& image, std::string& name);

@@ -378,6 +378,18 @@ void test_battery_reading_survives_rng_use() {
 
 // ---- SD card (skipped without a working card) --------------------------------
 
+void test_sd_mount_never_blocks_longer_than_timeout() {
+    uint32_t t0 = millis();
+    bool ok = sd::mount();
+    uint32_t ms = millis() - t0;
+    char msg[96];
+    snprintf(msg, sizeof msg, "sd::mount() -> %s in %u ms (wedged=%d)", ok ? "OK" : "fail",
+             unsigned(ms), int(sd::wedged()));
+    TEST_MESSAGE(msg);
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 3500, "mount blocked longer than its timeout");
+    if (ok) sd::unmount();
+}
+
 void test_sd_backup_roundtrip() {
     if (!sd::mount()) TEST_IGNORE_MESSAGE("no working SD card inserted");
     std::vector<uint8_t> image(5000), back;
@@ -449,6 +461,7 @@ void setup() {
         RUN_TEST(test_full_vault_cycle_on_flash);
         RUN_TEST(test_hw_rng_output_looks_random);
         RUN_TEST(test_battery_reading_survives_rng_use);
+        RUN_TEST(test_sd_mount_never_blocks_longer_than_timeout);
         RUN_TEST(test_sd_backup_roundtrip);
         RUN_TEST(test_sd_numbering_never_overwrites_and_caps_reads);
         erase_vault_partition();

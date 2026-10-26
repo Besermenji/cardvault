@@ -412,7 +412,7 @@ void test_dialog_messages_fit_the_screen() {
                           msg::kWipeNotArmed, msg::kWipeRemount, msg::kGuardUnavailable,
                           msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged,
                           msg::kCompactConfirm, msg::kCompactDone, msg::kCompactFailed,
-                          msg::kCompactAfterPass}) {
+                          msg::kCompactAfterPass, msg::kSdStalled}) {
         TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
                                      msg::kDialogMaxLines,
                                  m);
@@ -421,6 +421,7 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kWipeFailedTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kGuardUnavailableTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kSdStalledTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactFailedTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }

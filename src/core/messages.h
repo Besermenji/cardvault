@@ -47,6 +47,10 @@ constexpr const char* kCompactAfterPass =
     "Flash still holds old copies that open with the OLD passphrase. Compact now? "
     "Old SD backups keep their own passphrase.";
 
+constexpr const char* kSdStalledTitle = "SD card not readable";
+constexpr const char* kSdStalled =
+    "The card did not respond. Remove it and restart the device to use SD again.";
+
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;
 
