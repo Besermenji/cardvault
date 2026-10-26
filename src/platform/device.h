@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "crypto/kdf.h"
+#include "crypto/kdf_calibrate.h"
 
 // NVS namespaces. Test builds override them so they never touch real state.
 #ifndef CV_NVS_GUARD
@@ -29,8 +30,10 @@ void radios_off();
 Settings load_settings();
 void save_settings(const Settings& s);
 
-// Picks Argon2 memory from available heap and passes for ~target_ms unlock time.
-KdfParams calibrate_kdf(uint32_t target_ms);
+// Picks Argon2 memory from the free heap and times the device to choose passes
+// for ~target_ms unlock time. Steps the memory down if the work area cannot be
+// allocated. status == Failed means no usable parameters.
+KdfTuning calibrate_kdf(uint32_t target_ms);
 
 bool time_valid();
 uint32_t unix_time();  // 0 if the clock was never set

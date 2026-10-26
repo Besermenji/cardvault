@@ -1,6 +1,7 @@
 // Single-line and multi-line text editor, optionally masked.
 #include <cmath>
 
+#include "core/messages.h"
 #include "features/pwgen.h"
 #include "ui/app.h"
 
@@ -325,6 +326,25 @@ bool attempt_delay_active() {
     char msg[40];
     snprintf(msg, sizeof msg, "Too many tries. Wait %us", unsigned((ms + 999) / 1000));
     app().toast(msg, color::warn, 2500);
+    return true;
+}
+
+bool tune_security(KdfParams& out, char (&note)[48]) {
+    App& a = app();
+    note[0] = 0;
+    a.busy("Tuning security...");
+    KdfTuning t = device::calibrate_kdf(2000);
+    if (t.status == KdfTuneStatus::Failed) {
+        a.router.push(make_message(msg::kTuneFailedTitle, msg::kTuneFailed, color::bad));
+        return false;
+    }
+    if (t.status != KdfTuneStatus::Ok) {
+        // Fitted time at the chosen passes; the target could not be met.
+        uint32_t ms = uint32_t((uint64_t(t.overhead_us) + uint64_t(t.params.passes) * t.per_pass_us) / 1000);
+        snprintf(note, sizeof note, "Unlock takes about %u.%u s, not 2 s", unsigned(ms / 1000),
+                 unsigned(ms % 1000 / 100));
+    }
+    out = t.params;
     return true;
 }
 

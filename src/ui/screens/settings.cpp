@@ -117,13 +117,19 @@ void change_passphrase_flow() {
         }
         ask_new_passphrase("New passphrase", [](SString& next) {
             App& a = app();
+            // Re-tune: vaults from older builds get the full unlock cost too.
+            KdfParams kdf;
+            char note[48];
+            if (!tune_security(kdf, note)) return;
             a.busy("Re-encrypting...");
-            VaultError e = a.session.change_passphrase(a.store, next, a.session.header().kdf);
-            if (e == VaultError::Ok)
+            VaultError e = a.session.change_passphrase(a.store, next, kdf);
+            if (e == VaultError::Ok) {
+                if (note[0]) a.toast(note, color::warn, 3500);
                 a.router.push(make_confirm(msg::kCompactAfterPassTitle, msg::kCompactAfterPass,
                                            [] { run_compact(true); }, color::good));
-            else
+            } else {
                 a.toast(vault_error_str(e), color::bad, 3000);
+            }
         });
     }));
 }

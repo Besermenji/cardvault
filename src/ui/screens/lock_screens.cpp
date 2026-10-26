@@ -27,8 +27,9 @@ void create_vault(SString& pass) {
                                    color::bad));
         return;
     }
-    a.busy("Tuning security...");
-    KdfParams kdf = device::calibrate_kdf(2000);
+    KdfParams kdf;
+    char note[48];
+    if (!tune_security(kdf, note)) return;
     a.busy("Creating vault...");
     VaultError e = a.session.create(a.store, pass, kdf);
     if (e != VaultError::Ok) {
@@ -36,7 +37,10 @@ void create_vault(SString& pass) {
         return;
     }
     a.router.reset(make_home());
-    a.toast("Vault created. TAB opens the menu.", color::good, 3000);
+    if (note[0])
+        a.toast(note, color::warn, 3500);
+    else
+        a.toast("Vault created. TAB opens the menu.", color::good, 3000);
 }
 
 class SetupScreen : public Screen {

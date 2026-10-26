@@ -54,6 +54,10 @@ constexpr const char* kCompactAfterPass =
     "Flash still holds old copies that open with the OLD passphrase. Compact now? "
     "Old SD backups keep their own passphrase.";
 
+constexpr const char* kTuneFailedTitle = "Setup failed";
+constexpr const char* kTuneFailed =
+    "Not enough free memory to set up encryption. Restart the device and try again.";
+
 constexpr const char* kSdStalledTitle = "SD card not readable";
 constexpr const char* kSdStalled =
     "The card did not respond in time. Try again; if it keeps failing, use another card or "
