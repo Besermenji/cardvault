@@ -34,6 +34,19 @@ constexpr const char* kVaultNewer =
 constexpr const char* kPayloadDamaged =
     "The passphrase is correct but the vault data is corrupted. Restore a backup from SD (TAB menu).";
 
+constexpr const char* kCompactTitle = "Compact vault";
+constexpr const char* kCompactConfirm =
+    "Erases old encrypted copies left in flash, then rewrites your vault. Do not power off. "
+    "Make an SD backup first. Y to start.";
+constexpr const char* kCompactDone = "Old copies are gone. Only the current vault is in flash.";
+constexpr const char* kCompactFailedTitle = "Compact failed";
+constexpr const char* kCompactFailed =
+    "Your vault is only in memory now. Do not lock or power off. Y to retry, or back up to SD.";
+constexpr const char* kCompactAfterPassTitle = "Passphrase changed";
+constexpr const char* kCompactAfterPass =
+    "Flash still holds old copies that open with the OLD passphrase. Compact now? "
+    "Old SD backups keep their own passphrase.";
+
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;
 

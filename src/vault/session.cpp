@@ -88,13 +88,17 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     return VaultError::Ok;
 }
 
-VaultError VaultSession::save(BlobStore& store) {
+VaultError VaultSession::seal(std::vector<uint8_t>& out) const {
     if (!open_) return VaultError::NotOpen;
     SBytes payload;
     VaultError e = serialize(data_, payload);
     if (e != VaultError::Ok) return e;
+    return seal_file(hdr_, dek_.data(), payload.data(), payload.size(), out);
+}
+
+VaultError VaultSession::save(BlobStore& store) {
     std::vector<uint8_t> file;
-    e = seal_file(hdr_, dek_.data(), payload.data(), payload.size(), file);
+    VaultError e = seal(file);
     if (e != VaultError::Ok) return e;
     return store.write(file) ? VaultError::Ok : VaultError::Io;
 }

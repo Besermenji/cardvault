@@ -448,6 +448,67 @@ void test_oversize_or_bad_layout_costs_no_attempt() {
     TEST_ASSERT_EQUAL(0, f.guard.failures());
 }
 
+// ---- Compact -----------------------------------------------------------------
+
+struct FlakyStore : MemoryStore {
+    bool fail_erase = false, fail_write = false;
+    int erases = 0;
+    bool erase() override {
+        erases++;
+        return !fail_erase && MemoryStore::erase();
+    }
+    bool write(const std::vector<uint8_t>& d) override {
+        return !fail_write && MemoryStore::write(d);
+    }
+};
+
+void test_compact_rewrites_current_vault_and_keeps_counter() {
+    Fixture f;
+    f.guard.begin_attempt();
+    TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
+                      int(unlock_attempt(f.guard, f.session, f.store, "right horse battery").kind));
+    f.guard.begin_attempt();
+    f.guard.begin_attempt();
+    std::vector<uint8_t> before;
+    f.store.read(before);
+    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(f.session, f.store)));
+    std::vector<uint8_t> after;
+    f.store.read(after);
+    TEST_ASSERT_TRUE(before != after);  // fresh nonce
+    TEST_ASSERT_EQUAL(2, f.guard.failures());
+    f.session.close();
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(f.session.unlock(f.store, "right horse battery")));
+    TEST_ASSERT_EQUAL(1, f.session.data().entries.size());
+}
+
+void test_compact_needs_open_session_and_touches_nothing() {
+    Fixture f;  // session closed
+    std::vector<uint8_t> before = f.store.blob;
+    FlakyStore s;
+    s.write(before);
+    TEST_ASSERT_EQUAL(int(CompactResult::NotOpen), int(compact_vault(f.session, s)));
+    TEST_ASSERT_EQUAL(0, s.erases);
+    TEST_ASSERT_TRUE(s.blob == before);
+}
+
+void test_compact_storage_failures_keep_session_open() {
+    for (int mode = 0; mode < 2; mode++) {
+        Fixture f;
+        TEST_ASSERT_EQUAL(int(VaultError::Ok), int(f.session.unlock(f.store, "right horse battery")));
+        FlakyStore s;
+        s.write(f.store.blob);
+        s.fail_erase = mode == 0;
+        s.fail_write = mode == 1;
+        TEST_ASSERT_EQUAL(int(CompactResult::StorageFailed), int(compact_vault(f.session, s)));
+        TEST_ASSERT_TRUE(f.session.is_open());
+        // Retry once storage works again: the vault is back.
+        s.fail_erase = s.fail_write = false;
+        TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(f.session, s)));
+        VaultSession check;
+        TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check.unlock(s, "right horse battery")));
+    }
+}
+
 void test_restore_wrong_passphrase_counts_while_locked() {
     Fixture f;
     auto backup = make_backup("backup pass", 2);
@@ -752,6 +813,9 @@ int main() {
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
     RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
     RUN_TEST(test_oversize_or_bad_layout_costs_no_attempt);
+    RUN_TEST(test_compact_rewrites_current_vault_and_keeps_counter);
+    RUN_TEST(test_compact_needs_open_session_and_touches_nothing);
+    RUN_TEST(test_compact_storage_failures_keep_session_open);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
     return UNITY_END();

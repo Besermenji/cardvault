@@ -102,6 +102,24 @@ RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
 VaultError restore_commit(AttemptGuard& guard, VaultSession& session, BlobStore& store,
                           const std::vector<uint8_t>& image, const SString& pass);
 
+// ---- Compact ----------------------------------------------------------------
+
+// Flash keeps old ciphertext after every save (copy-on-write): earlier
+// versions, deleted entries and, after a passphrase change, a header that the
+// old passphrase still opens. Compacting erases the whole partition and
+// writes the open vault back, so only the current image remains.
+enum class CompactResult {
+    Done,
+    NotOpen,        // nothing in memory to write back; storage untouched
+    SealFailed,     // could not build the image; storage untouched
+    StorageFailed,  // erase or write failed: flash may no longer hold the vault,
+                    // which lives only in this session until a retry succeeds
+};
+
+// Never touches the attempt counter. On StorageFailed the session stays open
+// so the caller can retry or take an SD backup.
+CompactResult compact_vault(const VaultSession& session, BlobStore& store);
+
 // ---- Locking ----------------------------------------------------------------
 
 // Destroys every screen (and any secrets they hold), wipes the session and

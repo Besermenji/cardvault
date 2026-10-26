@@ -3,6 +3,9 @@
 // They use the test partition table (vault at 0x410000) and test NVS
 // namespaces, so a real vault on the device is never touched.
 #include <Arduino.h>
+
+#include <algorithm>
+#include <cstring>
 #include <LittleFS.h>
 #include <M5Cardputer.h>
 #include <esp_heap_caps.h>
@@ -186,6 +189,49 @@ void test_stale_tmp_does_not_replace_good_vault() {
     TEST_ASSERT_TRUE(out == next);
 }
 
+// Counts occurrences of `needle` anywhere in the raw vault partition.
+static size_t count_in_partition(const uint8_t* needle, size_t n) {
+    const esp_partition_t* p = vault_part();
+    std::vector<uint8_t> buf(4096);
+    size_t hits = 0;
+    for (size_t off = 0; off < p->size; off += buf.size() - n) {
+        size_t len = std::min(buf.size(), size_t(p->size - off));
+        if (esp_partition_read(p, off, buf.data(), len) != ESP_OK) break;
+        for (size_t i = 0; i + n <= len; i++)
+            if (memcmp(buf.data() + i, needle, n) == 0) hits++;
+        if (off + len >= p->size) break;
+    }
+    return hits;
+}
+
+void test_compact_removes_stale_old_header() {
+    erase_vault_partition();
+    FlashStore s;
+    TEST_ASSERT_TRUE(s.begin());
+    VaultSession v;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(v.create(s, "first passphrase", KdfParams{64, 3})));
+    uint8_t old_salt[kSaltSize];
+    memcpy(old_salt, v.header().salt, kSaltSize);
+    TEST_ASSERT_EQUAL(int(VaultError::Ok),
+                      int(v.change_passphrase(s, "second passphrase", KdfParams{64, 3})));
+    uint8_t new_salt[kSaltSize];
+    memcpy(new_salt, v.header().salt, kSaltSize);
+    TEST_ASSERT_TRUE(memcmp(old_salt, new_salt, kSaltSize) != 0);
+
+    char msg[80];
+    snprintf(msg, sizeof msg, "old header copies before compact: %u",
+             unsigned(count_in_partition(old_salt, kSaltSize)));
+    TEST_MESSAGE(msg);
+
+    TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(v, s)));
+    TEST_ASSERT_EQUAL(0, count_in_partition(old_salt, kSaltSize));
+    TEST_ASSERT_EQUAL(1, count_in_partition(new_salt, kSaltSize));
+    // The vault still opens with the new passphrase only.
+    VaultSession again;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(again.unlock(s, "second passphrase")));
+    TEST_ASSERT_EQUAL(int(VaultError::WrongPassphrase), int(again.unlock(s, "first passphrase")));
+}
+
 void test_erase_destroys_everything() {
     FlashStore s;
     TEST_ASSERT_TRUE(s.begin());
@@ -359,6 +405,7 @@ void setup() {
         RUN_TEST(test_truncated_tmp_is_deleted_not_promoted);
         RUN_TEST(test_oversize_vault_is_refused_before_allocating);
         RUN_TEST(test_stale_tmp_does_not_replace_good_vault);
+        RUN_TEST(test_compact_removes_stale_old_header);
         RUN_TEST(test_erase_destroys_everything);
         RUN_TEST(test_nvs_guard_persists_across_instances);
         RUN_TEST(test_test_build_uses_isolated_nvs);

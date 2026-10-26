@@ -27,6 +27,9 @@ public:
     // passphrase was right, even when a later step (payload) then fails.
     VaultError unlock_bytes(const std::vector<uint8_t>& file, const SString& pass,
                             bool* key_ok = nullptr);
+    // Re-encrypts the current contents (fresh nonce) into `out` without
+    // touching any storage.
+    VaultError seal(std::vector<uint8_t>& out) const;
     // Re-encrypts the current contents (fresh nonce) and writes to `store`.
     VaultError save(BlobStore& store);
     // New salt, new data key, new passphrase; then saves.

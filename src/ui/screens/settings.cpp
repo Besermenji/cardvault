@@ -22,6 +22,29 @@ void format_duration(uint32_t s, char* buf, size_t n) {
         snprintf(buf, n, "%u min", unsigned(s / 60));
 }
 
+// Rewrites the vault so flash holds only the current image. A failure can
+// leave the vault only in memory, so it offers a retry instead of just an error.
+void run_compact() {
+    App& a = app();
+    a.busy("Compacting...");
+    switch (compact_vault(a.session, a.store)) {
+        case CompactResult::Done:
+            a.router.push(make_message(msg::kCompactTitle, msg::kCompactDone, color::good));
+            break;
+        case CompactResult::StorageFailed:
+            a.router.push(make_confirm(msg::kCompactFailedTitle, msg::kCompactFailed, run_compact,
+                                       color::bad));
+            break;
+        default:
+            a.toast("Could not compact", color::bad, 3000);
+            break;
+    }
+}
+
+void compact_flow() {
+    app().router.push(make_confirm(msg::kCompactTitle, msg::kCompactConfirm, run_compact));
+}
+
 void change_passphrase_flow() {
     if (attempt_delay_active()) return;
     InputOpts o = existing_passphrase_opts("First confirm your current passphrase");
@@ -65,10 +88,8 @@ void change_passphrase_flow() {
             a.busy("Re-encrypting...");
             VaultError e = a.session.change_passphrase(a.store, next, a.session.header().kdf);
             if (e == VaultError::Ok)
-                a.router.push(make_message("Passphrase changed",
-                                           "Old SD backups still open with the passphrase they "
-                                           "were made with.",
-                                           color::good));
+                a.router.push(make_confirm(msg::kCompactAfterPassTitle, msg::kCompactAfterPass,
+                                           run_compact, color::good));
             else
                 a.toast(vault_error_str(e), color::bad, 3000);
         });
@@ -126,7 +147,7 @@ public:
         if (sel_ >= first_ + visible) first_ = sel_ - visible + 1;
         static const char* labels[kRows] = {"Auto-lock",       "Brightness",     "Set clock (UTC)",
                                             "Change passphrase", "Backup to SD", "Restore from SD",
-                                            "About",           "Erase vault"};
+                                            "About",           "Compact vault",  "Erase vault"};
         for (int i = 0; i < visible && first_ + i < kRows; i++) {
             int idx = first_ + i;
             int y = kBodyY + i * row_h;
@@ -149,7 +170,7 @@ public:
     }
 
 private:
-    static constexpr int kRows = 8;
+    static constexpr int kRows = 9;
 
     void adjust(int d) {
         App& a = app();
@@ -177,7 +198,8 @@ private:
             case 4: start_backup_flow(); break;
             case 5: start_restore_flow(); break;
             case 6: show_about(); break;
-            case 7: erase_flow(); break;
+            case 7: compact_flow(); break;
+            case 8: erase_flow(); break;
         }
     }
 

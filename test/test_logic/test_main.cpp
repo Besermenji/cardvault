@@ -409,7 +409,9 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kStorageSetupTitle) <= 20);
     for (const char* m : {msg::kWipeResume, msg::kWipeCounterStuck, msg::kWipeRetry,
                           msg::kWipeNotArmed, msg::kWipeRemount, msg::kGuardUnavailable,
-                          msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged}) {
+                          msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged,
+                          msg::kCompactConfirm, msg::kCompactDone, msg::kCompactFailed,
+                          msg::kCompactAfterPass}) {
         TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
                                      msg::kDialogMaxLines,
                                  m);
@@ -417,6 +419,9 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kWipeErasedTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kWipeFailedTitle) <= 20);
     TEST_ASSERT_TRUE(strlen(msg::kGuardUnavailableTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kCompactTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kCompactFailedTitle) <= 20);
+    TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }
 
 int main() {
