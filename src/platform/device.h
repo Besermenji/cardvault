@@ -19,10 +19,28 @@
 
 namespace cv {
 
+// Limits that keep the device usable: a 0 s auto-lock would lock at once, a
+// dark display cannot be read.
+constexpr uint32_t kMinAutolockS = 30;
+constexpr uint32_t kMaxAutolockS = 1800;
+constexpr uint32_t kMinBrightness = 20;
+constexpr uint32_t kMaxBrightness = 255;
+
 struct Settings {
     uint32_t autolock_s = 120;
     uint32_t brightness = 120;
 };
+
+inline uint32_t clamp_u32(uint32_t v, uint32_t lo, uint32_t hi) {
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+// Pulls stored values back into the allowed range.
+inline Settings clamp_settings(Settings s) {
+    s.autolock_s = clamp_u32(s.autolock_s, kMinAutolockS, kMaxAutolockS);
+    s.brightness = clamp_u32(s.brightness, kMinBrightness, kMaxBrightness);
+    return s;
+}
 
 namespace device {
 

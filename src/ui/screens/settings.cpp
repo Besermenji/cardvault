@@ -222,7 +222,8 @@ private:
             i = constrain(i + d, 0, n - 1);
             a.settings.autolock_s = kAutolockChoices[i];
         } else if (sel_ == 1) {
-            a.settings.brightness = uint32_t(constrain(int(a.settings.brightness) + d * 25, 20, 255));
+            a.settings.brightness = clamp_u32(uint32_t(int(a.settings.brightness) + d * 25),
+                                              kMinBrightness, kMaxBrightness);
             a.apply_brightness();
         } else {
             return;

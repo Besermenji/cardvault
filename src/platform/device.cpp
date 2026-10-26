@@ -27,7 +27,7 @@ Settings load_settings() {
         s.brightness = p.getUInt("bright", s.brightness);
         p.end();
     }
-    return s;
+    return clamp_settings(s);
 }
 
 void save_settings(const Settings& s) {

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <LittleFS.h>
 #include <M5Cardputer.h>
+#include <Preferences.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
@@ -333,6 +334,25 @@ void test_nvs_guard_persists_across_instances() {
     TEST_ASSERT_EQUAL(0, g2.failures());
 }
 
+void test_stored_settings_are_clamped_on_load() {
+    Preferences p;
+    TEST_ASSERT_TRUE(p.begin(CV_NVS_CFG, false));
+    p.putUInt("autolock", 0);
+    p.putUInt("bright", 0);
+    p.end();
+    Settings s = device::load_settings();
+    TEST_ASSERT_EQUAL_UINT32(kMinAutolockS, s.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMinBrightness, s.brightness);
+    TEST_ASSERT_TRUE(p.begin(CV_NVS_CFG, false));
+    p.putUInt("autolock", 4000000000u);
+    p.putUInt("bright", 4000000000u);
+    p.end();
+    s = device::load_settings();
+    TEST_ASSERT_EQUAL_UINT32(kMaxAutolockS, s.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMaxBrightness, s.brightness);
+    device::save_settings(Settings());  // leave defaults behind
+}
+
 void test_test_build_uses_isolated_nvs() {
     TEST_ASSERT_EQUAL_STRING("cvt_guard", CV_NVS_GUARD);
     TEST_ASSERT_EQUAL_STRING("cvt_cfg", CV_NVS_CFG);
@@ -565,6 +585,7 @@ void setup() {
         RUN_TEST(test_erase_destroys_everything);
         RUN_TEST(test_nvs_guard_persists_across_instances);
         RUN_TEST(test_test_build_uses_isolated_nvs);
+        RUN_TEST(test_stored_settings_are_clamped_on_load);
         RUN_TEST(test_kdf_calibration_fits_heap_and_time);
         RUN_TEST(test_kdf_work_cap_leaves_headroom);
         RUN_TEST(test_full_vault_cycle_on_flash);

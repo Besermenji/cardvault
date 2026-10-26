@@ -11,6 +11,7 @@
 #include "core/entry_rules.h"
 #include "core/messages.h"
 #include "core/mnemonic_entry.h"
+#include "platform/device.h"
 #include "ui/textwrap.h"
 
 using namespace cv;
@@ -521,9 +522,24 @@ void test_next_backup_number_skips_used_and_ignores_junk() {
     TEST_ASSERT_EQUAL(-1, next_backup_number({"backup-99999999.cvb"}));
 }
 
+void test_settings_are_clamped_to_usable_values() {
+    Settings low = clamp_settings({0, 0});
+    TEST_ASSERT_EQUAL_UINT32(kMinAutolockS, low.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMinBrightness, low.brightness);
+    Settings high = clamp_settings({0xFFFFFFFFu, 100000});
+    TEST_ASSERT_EQUAL_UINT32(kMaxAutolockS, high.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMaxBrightness, high.brightness);
+    Settings ok = clamp_settings({300, 120});
+    TEST_ASSERT_EQUAL_UINT32(300, ok.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(120, ok.brightness);
+    // The auto-lock milliseconds computation cannot overflow at the cap.
+    TEST_ASSERT_TRUE(uint64_t(kMaxAutolockS) * 1000 < 0xFFFFFFFFull);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_backup_names_parse_strictly);
+    RUN_TEST(test_settings_are_clamped_to_usable_values);
     RUN_TEST(test_backup_sort_is_numeric_newest_first);
     RUN_TEST(test_next_backup_number_skips_used_and_ignores_junk);
     RUN_TEST(test_mnemonic_autoaccepts_unique_four_letter_prefix);
