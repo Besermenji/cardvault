@@ -15,6 +15,13 @@ namespace {
 
 std::string g_line;
 bool g_g0 = false;
+// Id of the request being answered ("-" when the line had none). Every reply
+// carries it, so the host can tell a late reply from the one it waits for.
+std::string g_id = "-";
+// `sync` is answered once the key queue is empty and the main loop has gone
+// round twice since, i.e. every earlier key was handled and navigated.
+std::string g_sync_id;
+int g_sync_wait = 0;
 
 std::string esc(const std::string& s) {
     std::string o;
@@ -38,10 +45,14 @@ std::string esc(const std::string& s) {
 
 void reply(const std::string& s) {
     Serial.print("OK ");
+    Serial.print(g_id.c_str());
+    Serial.print(' ');
     Serial.println(s.c_str());
 }
 void error(const char* s) {
     Serial.print("ERR ");
+    Serial.print(g_id.c_str());
+    Serial.print(' ');
     Serial.println(s);
 }
 
@@ -102,7 +113,21 @@ void dump(ui::App& a) {
     reply(j + "]");
 }
 
-void handle(ui::App& a, const std::string& line) {
+// "<id> <command> [argument]"; the id is a decimal number chosen by the host.
+void handle(ui::App& a, const std::string& request) {
+    std::string line;
+    size_t idlen = request.find(' ');
+    if (idlen == std::string::npos) idlen = request.size();
+    bool numeric = idlen > 0 && idlen <= 18;
+    for (size_t i = 0; i < idlen && numeric; i++)
+        if (request[i] < '0' || request[i] > '9') numeric = false;
+    if (!numeric) {
+        g_id = "-";
+        return error("bad request");
+    }
+    g_id = request.substr(0, idlen);
+    if (idlen < request.size()) line = request.substr(idlen + 1);
+
     std::string cmd = line, arg;
     auto sp = line.find(' ');
     if (sp != std::string::npos) {
@@ -111,6 +136,9 @@ void handle(ui::App& a, const std::string& line) {
     }
     if (cmd == "ping") {
         reply("pong");
+    } else if (cmd == "sync") {
+        g_sync_id = g_id;
+        g_sync_wait = 2;
     } else if (cmd == "state") {
         state(a);
     } else if (cmd == "dump") {
@@ -180,6 +208,10 @@ void begin() {
 }
 
 void poll(ui::App& a) {
+    if (g_sync_wait > 0 && ui::pending_keys() == 0 && --g_sync_wait == 0) {
+        g_id = g_sync_id;
+        reply("");
+    }
     while (Serial.available()) {
         char c = char(Serial.read());
         if (c == '\r') continue;

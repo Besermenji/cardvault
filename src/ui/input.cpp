@@ -91,6 +91,7 @@ namespace {
 char g_held_override = 0;
 }
 void inject_key(const Key& k) { g_stream.inject(k); }
+size_t pending_keys() { return g_stream.pending(); }
 void set_sim_pressed(char c) { g_sim_down = c; }
 void set_held_override(char c, bool held) { g_held_override = held ? c : 0; }
 bool key_held(char c) {

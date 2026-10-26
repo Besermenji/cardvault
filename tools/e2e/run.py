@@ -40,10 +40,20 @@ class Skip(Exception):
     pass
 
 
+# "OK <id> <payload>" / "ERR <id> <message>"; id is "-" when the device could
+# not read one.
+REPLY = re.compile(r"^(OK|ERR) (\d+|-)(?: (.*))?$")
+# Safe to send twice if the link drops after the first write.
+IDEMPOTENT = ("ping", "state", "dump", "storage", "sync")
+
+
 class Device:
     def __init__(self, port):
         self.port = port
         self.ser = None
+        self.seq = 0  # last request id
+        self.rx = b""  # bytes read but not yet split into lines
+        self.stale = 0  # replies that arrived for an earlier request
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -55,6 +65,7 @@ class Device:
                 self.ser = serial.Serial(self.port, 115200, timeout=0.2)
                 time.sleep(0.3)
                 self.ser.reset_input_buffer()
+                self.rx = b""
                 if self.cmd("ping", timeout=2, retry=False) == "pong":
                     return
             except (serial.SerialException, OSError, Fail):
@@ -68,33 +79,42 @@ class Device:
         raise Fail(f"device on {self.port} not responding")
 
     def cmd(self, line, timeout=10, retry=True):
+        """Send `line` with a fresh request id and return the payload of the
+        reply that carries the same id. Replies to earlier requests (late
+        answers after a timeout) are counted and skipped."""
+        self.seq += 1
+        rid = str(self.seq)
         try:
-            self.ser.write((line + "\n").encode())
+            self.ser.write(f"{rid} {line}\n".encode())
             end = time.time() + timeout
-            buf = b""
             while time.time() < end:
-                buf += self.ser.read(256)
-                while b"\n" in buf:
-                    raw, buf = buf.split(b"\n", 1)
-                    text = raw.decode(errors="replace").strip()
-                    if text.startswith("OK"):
-                        return text[3:]
-                    if text.startswith("ERR"):
-                        raise Fail(f"{line!r}: {text}")
+                self.rx += self.ser.read(256)
+                while b"\n" in self.rx:
+                    raw, self.rx = self.rx.split(b"\n", 1)
+                    m = REPLY.match(raw.decode(errors="replace").strip())
+                    if not m:
+                        continue  # boot output, CVTEST READY
+                    kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
+                    if got != rid and not (kind == "ERR" and got == "-"):
+                        self.stale += 1
+                        continue
+                    if kind == "ERR":
+                        raise Fail(f"{line!r}: {payload}")
+                    return payload
         except (serial.SerialException, OSError):
-            if not retry:
+            if not retry or line.split(" ", 1)[0] not in IDEMPOTENT:
                 raise
             self.connect()
             return self.cmd(line, timeout, retry=False)
         raise Fail(f"no reply to {line!r}")
 
     def restart_cmd(self, line):
-        """Send a command that reboots the device, then reconnect."""
+        """Send a command that reboots the device, then reconnect. The device
+        answers before it restarts; an ERR (a failed factory reset) fails."""
         try:
-            self.ser.write((line + "\n").encode())
-            self.ser.flush()
-        except serial.SerialException:
-            pass
+            self.cmd(line, timeout=30, retry=False)
+        except (serial.SerialException, OSError):
+            pass  # the link went away with the reboot
         time.sleep(1.5)
         try:
             self.ser.close()
@@ -123,14 +143,20 @@ class Device:
     def dump(self):
         return json.loads(self.cmd("dump"))
 
+    def sync(self):
+        """Returns once the device has handled every key sent so far."""
+        self.cmd("sync", timeout=60)
+
     def key(self, name, times=1):
+        # One key at a time: a key that changes the screen discards whatever
+        # is still queued behind it, so never leave two in the queue.
         for _ in range(times):
             self.cmd(f"key {name}")
-        time.sleep(0.05)
+            self.sync()
 
     def type(self, text):
         self.cmd(f"type {text}")
-        time.sleep(0.05)
+        self.sync()
 
     def wait(self, pred, what, timeout=20):
         end = time.time() + timeout
