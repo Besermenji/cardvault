@@ -29,6 +29,8 @@ constexpr size_t kNonceSize = 24;
 constexpr size_t kMacSize = 16;
 constexpr size_t kMaxPayload = 48 * 1024;
 constexpr size_t kPadBlock = 256;
+constexpr size_t kMinPassphraseLen = 8;
+constexpr size_t kMaxPassphraseLen = 128;
 
 enum class VaultError {
     Ok,
@@ -42,9 +44,14 @@ enum class VaultError {
     OutOfMemory,
     Io,
     NotOpen,
+    WeakPassphrase,
 };
 
 const char* vault_error_str(VaultError e);
+
+// Policy for a passphrase that protects a new vault image: 8-128 characters,
+// not whitespace-only. Returns Ok or WeakPassphrase.
+VaultError check_new_passphrase(const SString& pass);
 
 struct Header {
     uint8_t version = kFormatVersion;

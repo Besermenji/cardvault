@@ -72,12 +72,62 @@ SString pwgen_words(int count, char sep) {
     return out;
 }
 
+namespace {
+const char* const kKeyRows[] = {"1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm"};
+
+char lower_ascii(char c) { return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c; }
+
+// True if a and b are neighbours on one keyboard row (either direction).
+bool keyboard_neighbours(char a, char b) {
+    a = lower_ascii(a);
+    b = lower_ascii(b);
+    for (const char* row : kKeyRows) {
+        const char* pa = strchr(row, a);
+        const char* pb = strchr(row, b);
+        if (a && b && pa && pb && (pa - pb == 1 || pb - pa == 1)) return true;
+    }
+    return false;
+}
+
+// Only lowercase words separated by spaces/hyphens, all of them BIP39 words:
+// score 11 bits per distinct word. Returns false if the text isn't of that shape.
+bool bip39_words_bits(const SString& pass, double& bits) {
+    SVec<SString> seen;
+    SString word;
+    auto flush = [&]() {
+        if (word.empty()) return true;
+        if (bip39_index(word.c_str()) < 0) return false;
+        for (auto& w : seen)
+            if (w == word) {
+                word.clear();
+                return true;
+            }
+        seen.push_back(word);
+        word.clear();
+        return true;
+    };
+    for (char c : pass) {
+        if (c >= 'a' && c <= 'z') {
+            word += c;
+        } else if (c == ' ' || c == '-') {
+            if (!flush()) return false;
+        } else {
+            return false;
+        }
+    }
+    if (!flush() || seen.empty()) return false;
+    bits = 11.0 * double(seen.size());
+    return true;
+}
+}  // namespace
+
 double passphrase_strength_bits(const SString& pass) {
     if (pass.empty()) return 0;
+    double words_bits;
+    if (bip39_words_bits(pass, words_bits)) return words_bits;
+
     bool lo = false, up = false, di = false, sy = false, sp = false;
-    int repeats = 0;
-    for (size_t i = 0; i < pass.size(); i++) {
-        char c = pass[i];
+    for (char c : pass) {
         if (c >= 'a' && c <= 'z')
             lo = true;
         else if (c >= 'A' && c <= 'Z')
@@ -88,13 +138,36 @@ double passphrase_strength_bits(const SString& pass) {
             sp = true;
         else
             sy = true;
-        if (i > 0 && (pass[i] == pass[i - 1] || pass[i] == pass[i - 1] + 1)) repeats++;
     }
     int pool = (lo ? 26 : 0) + (up ? 26 : 0) + (di ? 10 : 0) + (sy ? 32 : 0) + (sp ? 1 : 0);
-    double effective_len = double(pass.size()) - repeats * 0.75;
-    if (effective_len < 1) effective_len = 1;
+
+    // Characters an attacker gets almost for free: repeats, runs (abc / cba),
+    // keyboard walks, and any 3-gram that already appeared earlier.
+    const size_t n = pass.size();
+    SVec<char> cheap(n, 0);
+    for (size_t i = 1; i < n; i++) {
+        char a = pass[i - 1], b = pass[i];
+        if (b == a || b == a + 1 || b == a - 1 || keyboard_neighbours(a, b)) cheap[i] = 1;
+    }
+    for (size_t i = 2; i < n; i++) {
+        for (size_t j = 0; j + 3 <= i; j++) {
+            if (pass[j] == pass[i - 2] && pass[j + 1] == pass[i - 1] && pass[j + 2] == pass[i]) {
+                cheap[i - 2] = cheap[i - 1] = cheap[i] = 1;
+                break;
+            }
+        }
+    }
+    double effective_len = 0;
+    for (size_t i = 0; i < n; i++) effective_len += cheap[i] ? 0.1 : 1.0;
     // Human-chosen text carries far less entropy than random text; scale down.
-    return effective_len * std::log2(double(pool)) * 0.6;
+    double bits = effective_len * std::log2(double(pool)) * 0.6;
+
+    // Plain lowercase prose is the easiest class to guess.
+    bool prose = true;
+    for (char c : pass)
+        if (!((c >= 'a' && c <= 'z') || c == ' ')) prose = false;
+    if (prose && bits > 50) bits = 50;
+    return bits;
 }
 
 }  // namespace cv

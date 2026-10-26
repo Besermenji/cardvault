@@ -19,12 +19,14 @@ VaultError derive(const SString& pass, const Header& h, Key32& kek) {
 
 VaultError VaultSession::build(const VaultData& data, const SString& pass, const KdfParams& kdf,
                                Header& hdr, uint8_t dek[32], std::vector<uint8_t>& out) {
+    VaultError e = check_new_passphrase(pass);
+    if (e != VaultError::Ok) return e;
     if (!kdf_params_valid(kdf)) return VaultError::BadParams;
     hdr = Header();
     hdr.kdf = kdf;
     header_new_salt(hdr);
     Key32 kek;
-    VaultError e = derive(pass, hdr, kek);
+    e = derive(pass, hdr, kek);
     if (e != VaultError::Ok) return e;
     rng_fill(dek, 32);
     header_wrap(hdr, kek.data(), dek);
@@ -59,6 +61,7 @@ VaultError VaultSession::unlock(BlobStore& store, const SString& pass) {
 
 VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SString& pass) {
     close();
+    if (pass.empty()) return VaultError::WeakPassphrase;
     Header h;
     VaultError e = Header::decode(file.data(), file.size(), h);
     if (e != VaultError::Ok) return e;

@@ -24,8 +24,10 @@ double pwgen_password_bits(const PwOptions& opt);
 SString pwgen_words(int count, char sep);
 inline double pwgen_words_bits(int count) { return 11.0 * count; }
 
-// Rough strength estimate (bits) of a user-chosen passphrase, based on length
-// and the character classes it uses, with penalties for repetition.
+// Rough strength estimate (bits) of a user-chosen passphrase. Display only:
+// the vault core enforces just the length policy. Penalises repeats, runs,
+// keyboard walks and repeated chunks, caps lowercase-only prose at 50 bits,
+// and credits 11 bits per distinct word for text made only of BIP39 words.
 double passphrase_strength_bits(const SString& pass);
 
 }  // namespace cv

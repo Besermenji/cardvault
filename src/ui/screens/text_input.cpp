@@ -323,9 +323,9 @@ void ask_new_passphrase(const char* title, TextDone done) {
     InputOpts o;
     o.mask = true;
     o.strength = true;
-    o.min_len = 8;
-    o.max_len = 128;
-    o.hint = "Long & unique. 5+ random words is great.";
+    o.min_len = kMinPassphraseLen;
+    o.max_len = kMaxPassphraseLen;
+    o.hint = "Best: 6+ generated BIP39 words (Tools)";
     app().router.push(make_text_input(title, "", o, [title, done](SString& first) {
         auto first_copy = std::make_shared<SecretBox>(first);
         InputOpts c;
