@@ -6,6 +6,7 @@
 #include "core/messages.h"
 #include "platform/sd_backup.h"
 #include "ui/app.h"
+#include "vault/serializer.h"
 #include "version.h"
 
 namespace cv {
@@ -148,11 +149,14 @@ void erase_flow() {
 
 void show_about() {
     App& a = app();
-    char msg[200];
+    char msg[240];
     const KdfParams& k = a.session.header().kdf;
+    unsigned used = unsigned(serialized_size(a.session.data()));
     snprintf(msg, sizeof msg,
-             "v%s  |  %u secrets  |  Argon2id %u KiB x%u  |  heap %u KB free  |  MIT licensed",
-             CV_VERSION, unsigned(a.session.data().entries.size()), unsigned(k.mem_kib),
+             "v%s  |  %u secrets  |  %u.%u of %u KB used  |  Argon2id %u KiB x%u  |  heap %u KB "
+             "free  |  MIT licensed",
+             CV_VERSION, unsigned(a.session.data().entries.size()), used / 1024,
+             used % 1024 * 10 / 1024, unsigned(kMaxPayload / 1024), unsigned(k.mem_kib),
              unsigned(k.passes), unsigned(heap_caps_get_free_size(MALLOC_CAP_8BIT) / 1024));
     a.router.push(make_message("CardVault", msg, color::accent));
 }
@@ -222,7 +226,10 @@ private:
             i = constrain(i + d, 0, n - 1);
             a.settings.autolock_s = kAutolockChoices[i];
         } else if (sel_ == 1) {
-            a.settings.brightness = uint32_t(constrain(int(a.settings.brightness) + d * 25, 20, 255));
+            // Signed sum: 20 - 25 must clamp to the minimum, not wrap around.
+            int v = int(a.settings.brightness) + d * 25;
+            a.settings.brightness =
+                uint32_t(constrain(v, int(kMinBrightness), int(kMaxBrightness)));
             a.apply_brightness();
         } else {
             return;

@@ -11,6 +11,8 @@
 #include "core/entry_rules.h"
 #include "core/messages.h"
 #include "core/mnemonic_entry.h"
+#include "platform/device.h"
+#include "ui/layout.h"
 #include "ui/textwrap.h"
 
 using namespace cv;
@@ -521,9 +523,39 @@ void test_next_backup_number_skips_used_and_ignores_junk() {
     TEST_ASSERT_EQUAL(-1, next_backup_number({"backup-99999999.cvb"}));
 }
 
+void test_generator_output_fits_the_small_font_box() {
+    const int cols = kPwgenColsSmall;
+    // Longest password: 64 characters; longest words: 12 x 8 letters + 11 dashes.
+    std::string pw(64, 'x'), words;
+    for (int i = 0; i < 12; i++) words += (i ? "-" : "") + std::string(8, 'w');
+    TEST_ASSERT_EQUAL(2, int(wrap(pw.data(), pw.size(), cols, true).size()));
+    TEST_ASSERT_TRUE(wrap(words.data(), words.size(), cols, false).size() <= 3);
+    TEST_ASSERT_TRUE(wrap(words.data(), words.size(), cols, false).size() >= 1);
+    // Everything is shown: line lengths add up to the whole text.
+    size_t shown = 0;
+    for (auto& l : wrap(words.data(), words.size(), cols, false)) shown += l.len;
+    TEST_ASSERT_EQUAL(words.size(), shown);
+}
+
+void test_settings_are_clamped_to_usable_values() {
+    Settings low = clamp_settings({0, 0});
+    TEST_ASSERT_EQUAL_UINT32(kMinAutolockS, low.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMinBrightness, low.brightness);
+    Settings high = clamp_settings({0xFFFFFFFFu, 100000});
+    TEST_ASSERT_EQUAL_UINT32(kMaxAutolockS, high.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(kMaxBrightness, high.brightness);
+    Settings ok = clamp_settings({300, 120});
+    TEST_ASSERT_EQUAL_UINT32(300, ok.autolock_s);
+    TEST_ASSERT_EQUAL_UINT32(120, ok.brightness);
+    // The auto-lock milliseconds computation cannot overflow at the cap.
+    TEST_ASSERT_TRUE(uint64_t(kMaxAutolockS) * 1000 < 0xFFFFFFFFull);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_backup_names_parse_strictly);
+    RUN_TEST(test_settings_are_clamped_to_usable_values);
+    RUN_TEST(test_generator_output_fits_the_small_font_box);
     RUN_TEST(test_backup_sort_is_numeric_newest_first);
     RUN_TEST(test_next_backup_number_skips_used_and_ignores_junk);
     RUN_TEST(test_mnemonic_autoaccepts_unique_four_letter_prefix);

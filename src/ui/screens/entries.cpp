@@ -9,6 +9,8 @@
 #include "features/bip39.h"
 #include "features/totp.h"
 #include "ui/app.h"
+#include "ui/peek.h"
+#include "vault/serializer.h"
 
 namespace cv {
 namespace ui {
@@ -25,7 +27,7 @@ bool icontains(const SString& hay, const SString& needle) {
 // Computes the current TOTP code for an entry. Returns false on bad secret.
 bool totp_now(const Entry& e, char* code, int& digits, uint32_t& period) {
     SBytes key;
-    if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) return false;
+    if (!base32_decode(e.value(kFieldTotpSecret), key) || key.empty()) return false;
     totp_settings(e, digits, period);
     uint32_t v = totp(key.data(), key.size(), device::unix_time(), period, digits);
     totp_format(v, digits, code);
@@ -96,9 +98,13 @@ public:
 
     void draw(Canvas& c) override {
         clear(c);
-        char title[32];
-        snprintf(title, sizeof title, "Vault  (%u)", unsigned(app().session.data().entries.size()));
-        header(c, title);
+        char title[40];
+        unsigned n = unsigned(app().session.data().entries.size());
+        if (used_pct_ >= kFullWarnPct)
+            snprintf(title, sizeof title, "Vault  (%u)  %u%% full", n, used_pct_);
+        else
+            snprintf(title, sizeof title, "Vault  (%u)", n);
+        header(c, title, used_pct_ >= kFullWarnPct ? color::warn : color::accent);
         int y = kBodyY;
         if (!query_.empty()) {
             c.fillRoundRect(4, y, kW - 8, 13, 3, color::panel);
@@ -130,6 +136,9 @@ public:
 
 private:
     void refresh() {
+        // The vault only changes on other screens, so this is fresh enough.
+        size_t pct = serialized_size(app().session.data()) * 100 / kMaxPayload;
+        used_pct_ = unsigned(pct > 100 ? 100 : pct);
         auto& entries = app().session.data().entries;
         std::vector<const Entry*> list;
         for (auto& e : entries)
@@ -154,7 +163,10 @@ private:
         app().router.push(make_menu("Menu", std::move(items)));
     }
 
+    static constexpr unsigned kFullWarnPct = 75;
+
     SString query_;
+    unsigned used_pct_ = 0;
     std::vector<uint32_t> ids_;
     int sel_ = 0;
     int first_ = 0;
@@ -168,10 +180,20 @@ public:
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
         out = "id=" + std::to_string(id_) + " sel=" + std::to_string(sel_) +
-              " reveal_all=" + std::to_string(reveal_all_) + " held=" + std::to_string(held_);
+              " reveal_all=" + std::to_string(reveal_all_) + " row=" + std::to_string(row_) +
+              " held=" + std::to_string(peek_.shown());
     }
 #endif
     explicit EntryViewScreen(uint32_t id) : id_(id) {}
+
+    // Coming back from a menu or editor always starts masked.
+    void on_resume() override { conceal(); }
+    void conceal() override {
+        reveal_all_ = false;
+        row_ = -1;
+        peek_.conceal();
+        invalidate();
+    }
 
     void on_key(const Key& k) override {
         invalidate();
@@ -189,7 +211,10 @@ public:
         } else if (k.down()) {
             sel_ = (sel_ + 1) % nf;
         } else if (k.is('r') || k.is('R')) {
-            reveal_all_ = !reveal_all_;
+            bool on = !reveal_all_;
+            conceal();
+            reveal_all_ = on;
+            revealed_at_ = millis();
         } else if (k.is('e') || k.is('E')) {
             app().router.push(make_entry_edit(id_, e->type));
         } else if (k.is('t') && e->type == EntryType::Totp) {
@@ -200,8 +225,8 @@ public:
                 app().router.push(make_seed_view(id_));
             else if (field_is_multiline(f) || (e->get(f) && e->get(f)->size() > 26))
                 app().router.push(make_text_view(id_, f));
-            else
-                reveal_all_ = !reveal_all_;
+            else if (field_is_secret(f))
+                toggle_row();  // just this row; other rows have nothing to reveal
         } else if (k.is(KeyCode::Tab)) {
             open_actions();
         }
@@ -209,11 +234,8 @@ public:
 
     void tick(uint32_t now) override {
         // Hold-to-reveal and live TOTP refresh.
-        bool held = key_held(' ');
-        if (held != held_) {
-            held_ = held;
-            invalidate();
-        }
+        if (peek_.update(key_held(' '), now, kRevealMs)) invalidate();
+        if ((reveal_all_ || row_ >= 0) && reveal_expired(now, revealed_at_, kRevealMs)) conceal();
         uint32_t sec = now / 1000;
         if (sec != last_sec_) {
             last_sec_ = sec;
@@ -260,18 +282,20 @@ public:
             int ry = y + i * row_h;
             list_row(c, ry, row_h - 1, idx == sel_);
             text_small(c, 9, ry + 2, field_label(f));
-            const SString* v = e->get(f);
-            SString value = v ? *v : SString();
-            bool hidden = field_is_secret(f) && !reveal_all_ && !(held_ && idx == sel_);
+            const SString& value = e->value(f);
+            bool hidden = field_is_secret(f) && !reveal_all_ && row_ != idx &&
+                          !(peek_.shown() && idx == sel_);
             if (value.empty()) {
                 text_mono(c, 9, ry + 8, "-", color::line);
             } else if (hidden) {
                 mask(c, 9, ry + 8, value.size(), 26);
             } else {
                 SString first_line = value.substr(0, value.find('\n'));
-                text_mono(c, 9, ry + 8, fit(first_line, 27).c_str());
+                SString shown = fit(first_line, 27);
+                text_mono(c, 9, ry + 8, shown.c_str());
+                wipe(first_line);
+                wipe(shown);
             }
-            wipe(value);
         }
         scrollbar(c, first_, visible, nf);
         footer(c, "SPACE peek  R reveal  ENTER  TAB more");
@@ -279,6 +303,16 @@ public:
 
 private:
     Entry* entry() { return app().session.data().find(id_); }
+
+    // ENTER on a secret row: reveal it alone, or hide everything if all are shown.
+    void toggle_row() {
+        if (reveal_all_) {
+            conceal();
+            return;
+        }
+        row_ = row_ == sel_ ? -1 : sel_;
+        revealed_at_ = millis();
+    }
 
     void open_actions() {
         uint32_t id = id_;
@@ -314,7 +348,9 @@ private:
     int sel_ = 0;
     int first_ = 0;
     bool reveal_all_ = false;
-    bool held_ = false;
+    int row_ = -1;  // index of the single row revealed with ENTER
+    uint32_t revealed_at_ = 0;
+    HoldPeek peek_;
     uint32_t last_sec_ = 0;
 };
 
@@ -404,7 +440,7 @@ public:
             }
             uint8_t f = idx == 0 ? 0 : fields[idx - 1];
             text_small(c, 9, y + 1, idx == 0 ? "Title" : field_label(f));
-            SString v = idx == 0 ? draft_.title : draft_.get_or(f);
+            const SString& v = idx == 0 ? draft_.title : draft_.value(f);
             if (v.empty()) {
                 text_small(c, 9, y + 11, f == kFieldPassword ? "(empty - ENTER type, G generate)"
                                                              : "(empty - ENTER to edit)",
@@ -412,9 +448,10 @@ public:
             } else if (field_is_secret(f)) {
                 mask(c, 9, y + 9, v.size(), 26);
             } else {
-                text_small(c, 9, y + 11, fit(v, 37).c_str(), color::text);
+                SString shown = fit(v, 37);
+                text_small(c, 9, y + 11, shown.c_str(), color::text);
+                wipe(shown);
             }
-            wipe(v);
         }
         scrollbar(c, first_, visible, rows);
         footer(c, "ENTER edit  TAB to save  ` cancel");
@@ -434,14 +471,14 @@ private:
             return;
         }
         if (f == kFieldWords) {
-            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) { set_field(kFieldWords, v); });
+            start_mnemonic_flow(draft_.value(f), [this](SString& v) { set_field(kFieldWords, v); });
             return;
         }
         InputOpts o;
         o.multiline = field_is_multiline(f);
         o.mask = f == kFieldPassword || f == kFieldBip39Pass || f == kFieldTotpSecret;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
-        app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
+        app().router.push(make_text_input(field_label(f), draft_.value(f), o, [this, f](SString& v) {
             set_field(f, v);
         }));
     }
@@ -524,15 +561,15 @@ public:
     const char* name() const override { return "seed_view"; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        out = "page=" + std::to_string(page_) + " show=" + std::to_string(reveal_ || held_) +
+        out = "page=" + std::to_string(page_) + " show=" + std::to_string(reveal_ || peek_.shown()) +
               " words=" + std::to_string(words_.size());
     }
 #endif
     explicit SeedViewScreen(uint32_t id) {
         if (const Entry* e = app().session.data().find(id)) {
-            words_ = bip39_split(e->get_or(kFieldWords));
-            status_ = bip39_validate(e->get_or(kFieldWords));
-            has_pass_ = !e->get_or(kFieldBip39Pass).empty();
+            words_ = bip39_split(e->value(kFieldWords));
+            status_ = bip39_validate(e->value(kFieldWords));
+            has_pass_ = !e->value(kFieldBip39Pass).empty();
         }
     }
     ~SeedViewScreen() override {
@@ -545,15 +582,21 @@ public:
         if (k.back()) app().router.pop();
         else if (k.left() || k.up()) page_ = (page_ + pages - 1) % pages;
         else if (k.right() || k.down() || k.is(KeyCode::Enter)) page_ = (page_ + 1) % pages;
-        else if (k.is('r') || k.is('R')) reveal_ = !reveal_;
+        else if (k.is('r') || k.is('R')) {
+            reveal_ = !reveal_;
+            revealed_at_ = millis();
+        }
     }
 
-    void tick(uint32_t) override {
-        bool held = key_held(' ');
-        if (held != held_) {
-            held_ = held;
-            invalidate();
-        }
+    void conceal() override {
+        reveal_ = false;
+        peek_.conceal();
+        invalidate();
+    }
+
+    void tick(uint32_t now) override {
+        if (reveal_ && reveal_expired(now, revealed_at_, kRevealMs)) conceal();
+        if (peek_.update(key_held(' '), now, kRevealMs)) invalidate();
     }
 
     void draw(Canvas& c) override {
@@ -561,7 +604,7 @@ public:
         char title[32];
         snprintf(title, sizeof title, "Seed  %d/%d", page_ + 1, page_count());
         header(c, title, color::accent);
-        bool show = reveal_ || held_;
+        bool show = reveal_ || peek_.shown();
         int start = page_ * kPerPage;
         for (int i = 0; i < kPerPage && start + i < int(words_.size()); i++) {
             int col = i / 3, row = i % 3;
@@ -598,7 +641,8 @@ private:
     bool has_pass_ = false;
     int page_ = 0;
     bool reveal_ = false;
-    bool held_ = false;
+    uint32_t revealed_at_ = 0;
+    HoldPeek peek_;
 };
 
 // ---------------------------------------------------------------------------
@@ -608,12 +652,12 @@ public:
     const char* name() const override { return "text_view"; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        out = "show=" + std::to_string(reveal_ || held_ || !field_is_secret(field_));
+        out = "show=" + std::to_string(reveal_ || peek_.shown() || !field_is_secret(field_));
     }
 #endif
     TextViewScreen(uint32_t id, uint8_t field) : field_(field) {
         if (const Entry* e = app().session.data().find(id)) {
-            text_ = e->get_or(field);
+            text_ = e->value(field);
             title_ = e->title;
         }
     }
@@ -627,15 +671,21 @@ public:
         if (k.back() || k.is(KeyCode::Enter)) app().router.pop();
         else if (k.up()) scroll_ = scroll_ > 0 ? scroll_ - 1 : 0;
         else if (k.down()) scroll_++;
-        else if (k.is('r') || k.is('R')) reveal_ = !reveal_;
+        else if (k.is('r') || k.is('R')) {
+            reveal_ = !reveal_;
+            revealed_at_ = millis();
+        }
     }
 
-    void tick(uint32_t) override {
-        bool held = key_held(' ');
-        if (held != held_) {
-            held_ = held;
-            invalidate();
-        }
+    void conceal() override {
+        reveal_ = false;
+        peek_.conceal();
+        invalidate();
+    }
+
+    void tick(uint32_t now) override {
+        if (reveal_ && reveal_expired(now, revealed_at_, kRevealMs)) conceal();
+        if (peek_.update(key_held(' '), now, kRevealMs)) invalidate();
     }
 
     void draw(Canvas& c) override {
@@ -646,7 +696,7 @@ public:
         auto lines = wrap(text_.data(), text_.size(), cols);
         int max_scroll = int(lines.size()) > rows ? int(lines.size()) - rows : 0;
         if (scroll_ > max_scroll) scroll_ = max_scroll;
-        bool show = reveal_ || held_ || !field_is_secret(field_);
+        bool show = reveal_ || peek_.shown() || !field_is_secret(field_);
         for (int r = 0; r < rows && scroll_ + r < int(lines.size()); r++) {
             const Line& l = lines[scroll_ + r];
             int y = kBodyY + r * kMonoH;
@@ -667,7 +717,8 @@ private:
     SString text_, title_;
     int scroll_ = 0;
     bool reveal_ = false;
-    bool held_ = false;
+    uint32_t revealed_at_ = 0;
+    HoldPeek peek_;
 };
 
 }  // namespace

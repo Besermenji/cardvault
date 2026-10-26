@@ -13,6 +13,43 @@ SString Entry::get_or(uint8_t key, const char* fallback) const {
     return v ? *v : SString(fallback);
 }
 
+Entry::Entry(Entry&& o) noexcept
+    : id(o.id), type(o.type), created(o.created), updated(o.updated),
+      title(std::move(o.title)), fields(std::move(o.fields)) {
+    o.clear();
+}
+
+Entry& Entry::operator=(const Entry& o) {
+    if (this == &o) return *this;
+    clear();
+    id = o.id;
+    type = o.type;
+    created = o.created;
+    updated = o.updated;
+    title = o.title;
+    fields = o.fields;
+    return *this;
+}
+
+Entry& Entry::operator=(Entry&& o) noexcept {
+    if (this == &o) return *this;
+    clear();
+    id = o.id;
+    type = o.type;
+    created = o.created;
+    updated = o.updated;
+    title = std::move(o.title);
+    fields = std::move(o.fields);
+    o.clear();
+    return *this;
+}
+
+const SString& Entry::value(uint8_t key) const {
+    static const SString kEmpty;
+    const SString* v = get(key);
+    return v ? *v : kEmpty;
+}
+
 void Entry::set(uint8_t key, const SString& value) {
     for (auto& f : fields) {
         if (f.key == key) {
@@ -39,9 +76,9 @@ Entry* VaultData::find(uint32_t id) {
     return nullptr;
 }
 
-uint32_t VaultData::add(Entry e) {
-    e.id = next_id++;
-    entries.push_back(std::move(e));
+uint32_t VaultData::add(const Entry& e) {
+    entries.push_back(e);
+    entries.back().id = next_id++;
     return entries.back().id;
 }
 
@@ -49,7 +86,7 @@ bool VaultData::remove(uint32_t id) {
     for (auto it = entries.begin(); it != entries.end(); ++it) {
         if (it->id == id) {
             it->clear();
-            entries.erase(it);
+            entries.erase(it);  // Entry's moves wipe every shifted source
             return true;
         }
     }

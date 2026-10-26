@@ -156,7 +156,9 @@ bool delete_entry(VaultData& data, uint32_t id, const std::function<bool()>& per
 // leaves only `unlock_screen` on the stack.
 void lock_session(ui::Router& router, VaultSession& session, ui::ScreenPtr unlock_screen);
 
-enum class AutolockAction { None, Dim, Lock, Wake };
+// Dim/Lock apply to an unlocked vault. Clear applies to the locked screens
+// (unlock, setup, restore): typed passphrases are wiped, the screen dims.
+enum class AutolockAction { None, Dim, Lock, Wake, Clear };
 
 AutolockAction autolock_step(bool unlocked, bool dimmed, uint32_t idle_ms, uint32_t limit_ms,
                              uint32_t dim_before_ms);

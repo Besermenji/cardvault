@@ -144,6 +144,14 @@ public:
         }
     }
 
+    // Idle: drop the typed passphrase. The attempt delay is not re-armed.
+    void conceal() override {
+        wipe(pass_);
+        reveal_ = false;
+        error_ = nullptr;
+        invalidate();
+    }
+
     void tick(uint32_t now) override {
         uint32_t sec = now / 1000;
         if (waiting() && sec != last_sec_) {

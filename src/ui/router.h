@@ -32,6 +32,8 @@ public:
     virtual void tick(uint32_t now_ms) { (void)now_ms; }
     // Called when this screen becomes the top again.
     virtual void on_resume() { invalidate(); }
+    // Hides anything revealed on screen (the screen dims, or a timeout ran out).
+    virtual void conceal() {}
     void invalidate() { dirty = true; }
     bool dirty = true;
 };
@@ -54,6 +56,12 @@ public:
     void clear_now() {
         ops_.clear();
         stack_.clear();
+    }
+    // Destroys every screen above the first one (and pending operations):
+    // dropping typed input and open prompts while keeping the base screen.
+    void pop_to_root() {
+        ops_.clear();
+        if (stack_.size() > 1) stack_.erase(stack_.begin() + 1, stack_.end());
     }
     Screen* top() { return stack_.empty() ? nullptr : stack_.back().get(); }
     size_t depth() const { return stack_.size(); }

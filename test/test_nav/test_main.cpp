@@ -10,6 +10,7 @@
 #include "core/messages.h"
 #include "crypto/kdf.h"
 #include "ui/key_stream.h"
+#include "ui/peek.h"
 #include "vault/serializer.h"
 
 using namespace cv;
@@ -225,6 +226,25 @@ void test_router_clear_now_destroys_everything_and_drops_pending() {
     int deletions = 0;
     for (auto& l : g_log) deletions += l.rfind("del ", 0) == 0;
     TEST_ASSERT_EQUAL(3, deletions);  // both stacked screens + the never-pushed one
+}
+
+void test_router_pop_to_root_keeps_only_the_base_screen() {
+    Router r;
+    r.push(fake("base"));
+    r.push(fake("input"));
+    r.push(fake("confirm"));
+    r.apply();
+    r.push(fake("pending"));
+    g_log.clear();
+    r.pop_to_root();
+    TEST_ASSERT_EQUAL(1, r.depth());
+    TEST_ASSERT_EQUAL(0, r.pending());
+    TEST_ASSERT_EQUAL_STRING("base", r.top()->name());
+    int deletions = 0;
+    for (auto& l : g_log) deletions += l.rfind("del ", 0) == 0;
+    TEST_ASSERT_EQUAL(3, deletions);  // two stacked screens + the never-pushed one
+    r.pop_to_root();  // already at the root: nothing happens
+    TEST_ASSERT_EQUAL(1, r.depth());
 }
 
 // ---- Wipe -------------------------------------------------------------------
@@ -991,13 +1011,46 @@ void test_lock_destroys_all_screens_and_wipes_session() {
 
 void test_autolock_step() {
     const uint32_t limit = 60000, dim = 10000;
-    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, false, 999999, limit, dim)));
+    // Locked screens: nothing until idle for the limit, then clear once and stay dim.
+    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, false, 59999, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Clear), int(autolock_step(false, false, 60000, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Clear), int(autolock_step(false, false, 999999, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(false, true, 60000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Wake), int(autolock_step(false, true, 0, limit, dim)));
+    TEST_ASSERT_EQUAL(int(AutolockAction::Wake), int(autolock_step(false, true, 59999, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(true, false, 49999, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Dim), int(autolock_step(true, false, 50000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::None), int(autolock_step(true, true, 55000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Lock), int(autolock_step(true, true, 60000, limit, dim)));
     TEST_ASSERT_EQUAL(int(AutolockAction::Lock), int(autolock_step(true, false, 70000, limit, dim)));
+}
+
+void test_reveal_expiry_tolerates_clock_read_before_reveal() {
+    TEST_ASSERT_FALSE(reveal_expired(1000, 1005, 20000));  // `now` read just before
+    TEST_ASSERT_FALSE(reveal_expired(20999, 1000, 20000));
+    TEST_ASSERT_TRUE(reveal_expired(21000, 1000, 20000));
+    TEST_ASSERT_TRUE(reveal_expired(5000, 0xFFFFF000u, 2000));  // across millis() wrap
+}
+
+void test_hold_peek_limits_and_conceal() {
+    HoldPeek p;
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_TRUE(p.update(true, 100, 20000));  // pressed: shows
+    TEST_ASSERT_TRUE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 19000, 20000));
+    TEST_ASSERT_TRUE(p.update(true, 20100, 20000));  // held too long: hides
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 90000, 20000));  // stays hidden while held
+    TEST_ASSERT_FALSE(p.update(false, 90100, 20000));  // released
+    TEST_ASSERT_TRUE(p.update(true, 90200, 20000));  // a new press shows again
+    p.conceal();  // screen dims while held
+    TEST_ASSERT_FALSE(p.shown());
+    TEST_ASSERT_FALSE(p.update(true, 90300, 20000));
+    p.update(false, 90400, 20000);
+    TEST_ASSERT_TRUE(p.update(true, 90500, 20000));
+    p.update(false, 90600, 20000);
+    p.conceal();  // concealing while not held blocks nothing later
+    TEST_ASSERT_TRUE(p.update(true, 90700, 20000));
 }
 
 int main() {
@@ -1012,6 +1065,7 @@ int main() {
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
+    RUN_TEST(test_router_pop_to_root_keeps_only_the_base_screen);
     RUN_TEST(test_boot_route);
     RUN_TEST(test_boot_route_without_counter_storage_blocks_everything);
     RUN_TEST(test_wipe_success_clears_vault_and_counter);
@@ -1060,5 +1114,7 @@ int main() {
     RUN_TEST(test_persist_before_lock_is_a_no_op_normally);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
+    RUN_TEST(test_reveal_expiry_tolerates_clock_read_before_reveal);
+    RUN_TEST(test_hold_peek_limits_and_conceal);
     return UNITY_END();
 }

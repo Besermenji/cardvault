@@ -18,7 +18,7 @@ encrypted with a passphrase only you know. No Wi-Fi. No Bluetooth. No cloud.
 | ⏱️ **2FA codes** | RFC 6238 TOTP (6/8 digits, 30/60 s) with a live overview of all your codes |
 | 💾 **SD backups** | Encrypted, verified backups to `/cardvault/*.cvb` on the microSD card, restorable on any Cardputer |
 | 🛡️ **Brute-force guard** | Escalating delays; **10 wrong passphrases in a row erase the vault** |
-| 🙈 **Privacy** | Secrets masked until you hold <kbd>Space</kbd>, auto-lock with dimming, <kbd>G0</kbd> side button locks instantly |
+| 🙈 **Privacy** | Secrets masked until you hold <kbd>Space</kbd> (revealed ones hide again after 20 s or on dimming), auto-lock with dimming, typed passphrases wiped when the lock screen idles, <kbd>G0</kbd> side button locks instantly |
 | 📡 **Air-gapped** | The firmware never turns on Wi-Fi or Bluetooth |
 
 ## Install
@@ -64,7 +64,7 @@ pio run -e cardputer -t upload
 | <kbd>1</kbd>–<kbd>9</kbd> | Pick a menu item (destructive items are only selected; confirm with <kbd>Enter</kbd>) |
 | <kbd>fn</kbd> + <kbd>`</kbd> (or <kbd>`</kbd> in lists) | Back / cancel |
 | <kbd>opt</kbd> | Show/hide the passphrase while typing |
-| hold <kbd>Space</kbd> / <kbd>R</kbd> | Reveal the selected secret / toggle reveal all |
+| hold <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>R</kbd> | Peek at the selected secret / reveal that row / reveal all (hides again after 20 s) |
 | <kbd>G0</kbd> (side button) | Lock immediately |
 
 1. **First boot** — create a passphrase (twice). Use something long: five or more random words is ideal.

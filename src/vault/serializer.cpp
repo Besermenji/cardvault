@@ -57,8 +57,26 @@ bool valid_type(uint8_t t) { return t >= 1 && t <= 4; }
 
 }  // namespace
 
+size_t entry_serialized_size(const Entry& e) {
+    // id, type, created, updated, title (len + bytes), field count
+    size_t n = 4 + 1 + 4 + 4 + 2 + e.title.size() + 1;
+    for (auto& f : e.fields) n += 1 + 2 + f.value.size();  // key, len, bytes
+    return n;
+}
+
+size_t serialized_size(const VaultData& data) {
+    size_t n = 1 + 4 + 2;  // version, next_id, entry count
+    for (auto& e : data.entries) n += entry_serialized_size(e);
+    return n;
+}
+
 VaultError serialize(const VaultData& data, SBytes& out) {
     wipe(out);
+    // The limit is judged by serialized_size(), so callers that report how
+    // full the vault is use exactly the rule that refuses it here.
+    size_t size = serialized_size(data);
+    if (size > kMaxPayload) return VaultError::TooLarge;
+    out.reserve(size);  // one allocation: no partial copies left by regrowth
     if (data.entries.size() > 0xffff) return VaultError::TooLarge;
     Writer w{out};
     w.u8(kPayloadVersion);

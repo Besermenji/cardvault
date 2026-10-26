@@ -2,6 +2,7 @@
 
 #include "core/flows.h"
 #include "core/messages.h"
+#include "vault/serializer.h"
 
 #include <M5Cardputer.h>
 
@@ -30,7 +31,16 @@ bool App::lock_now() {
 bool App::save() {
     VaultError e = session.save(store);
     if (e != VaultError::Ok) {
-        toast(vault_error_str(e), color::bad, 3000);
+        size_t size = serialized_size(session.data());
+        if (e == VaultError::TooLarge && size > kMaxPayload) {
+            // Say by how much, so the user knows what to shorten or remove.
+            char msg[40];
+            snprintf(msg, sizeof msg, "Vault full: %u bytes too much",
+                     unsigned(size - kMaxPayload));
+            toast(msg, color::bad, 3000);
+        } else {
+            toast(vault_error_str(e), color::bad, 3000);
+        }
         return false;
     }
     flash_missing = false;

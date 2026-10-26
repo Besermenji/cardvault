@@ -21,14 +21,22 @@ public:
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
         out = "index=" + std::to_string(m_.index()) + " prefix=" + m_.prefix().c_str() +
-              " candidates=" + std::to_string(m_.candidate_total());
+              " candidates=" + std::to_string(m_.candidate_total()) +
+              " hidden=" + std::to_string(hidden_);
     }
 #endif
     MnemonicInputScreen(int n, const SString& initial, TextDone done)
         : m_(n, initial), done_(std::move(done)) {}
 
+    // The screen dims: hide the word and its candidates until the next key.
+    void conceal() override {
+        hidden_ = true;
+        invalidate();
+    }
+
     void on_key(const Key& k) override {
         invalidate();
+        hidden_ = false;
         MnemonicEntry::Event ev = MnemonicEntry::Event::None;
         if (k.is(KeyCode::Esc)) {
             app().router.push(make_confirm("Discard words?", "The words typed so far are lost.",
@@ -69,6 +77,12 @@ public:
         // Typed prefix (or the already accepted word)
         int y = kBodyY + 10;
         c.fillRoundRect(6, y, 110, 22, 4, color::panel);
+        if (hidden_) {
+            mask(c, 12, y + 3, 6, 8);
+            text_small(c, 8, kBodyY + 36, "Hidden - press any key");
+            footer(c, "ENTER pick ;. choose DEL back fn,/ word");
+            return;
+        }
         const SString& prefix = m_.prefix();
         const SString& shown_word = prefix.empty() ? m_.word(idx) : prefix;
         text_mono(c, 12, y + 3, shown_word.c_str(), prefix.empty() ? color::good : color::text);
@@ -132,6 +146,7 @@ private:
 
     MnemonicEntry m_;
     bool blink_ = false;
+    bool hidden_ = false;
     TextDone done_;
 };
 
@@ -142,14 +157,22 @@ public:
     const char* name() const override { return "pwgen"; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        out = std::string("value=") + value_.c_str() + " sel=" + std::to_string(sel_);
+        out = std::string("value=") + value_.c_str() + " sel=" + std::to_string(sel_) +
+              " hidden=" + std::to_string(hidden_);
     }
 #endif
     explicit PwgenScreen(TextDone use) : use_(std::move(use)) { regenerate(); }
     ~PwgenScreen() override { wipe(value_); }
 
+    // The screen dims: hide the password until the next key.
+    void conceal() override {
+        hidden_ = true;
+        invalidate();
+    }
+
     void on_key(const Key& k) override {
         invalidate();
+        hidden_ = false;
         if (k.back()) {
             app().router.pop();
         } else if (k.up()) {
@@ -172,11 +195,21 @@ public:
         header(c, "Generator", color::info);
         // Output
         c.fillRoundRect(4, kBodyY, kW - 8, 36, 4, color::panel);
-        const int cols = (kW - 16) / kMonoW;
-        auto lines = wrap(value_.data(), value_.size(), cols, !words_);
-        for (int i = 0; i < 2 && i < int(lines.size()); i++) {
+        // Two large lines when they fit, else small text (3 lines): every
+        // character of the longest output must be readable.
+        auto lines = wrap(value_.data(), value_.size(), kPwgenCols, !words_);
+        bool small = lines.size() > 2;
+        if (small) lines = wrap(value_.data(), value_.size(), kPwgenColsSmall, !words_);
+        if (hidden_) {
+            text_small(c, 8, kBodyY + 14, "Hidden - press any key", color::dim);
+            lines.clear();
+        }
+        for (int i = 0; i < 3 && i < int(lines.size()); i++) {
             SString s(value_.data() + lines[i].start, lines[i].len);
-            text_mono(c, 8, kBodyY + 2 + i * kMonoH, s.c_str());
+            if (small)
+                text_small(c, 8, kBodyY + 3 + i * (kSmallH + 2), s.c_str(), color::text);
+            else
+                text_mono(c, 8, kBodyY + 2 + i * kMonoH, s.c_str());
             wipe(s);
         }
         double bits = words_ ? pwgen_words_bits(word_count_) : pwgen_password_bits(opt_);
@@ -255,6 +288,7 @@ private:
     bool words_ = false;
     int word_count_ = 6;
     int sel_ = 1;
+    bool hidden_ = false;
     SString value_;
 };
 
@@ -271,7 +305,7 @@ public:
         for (auto& e : app().session.data().entries) {
             if (e.type != EntryType::Totp) continue;
             SBytes key;
-            if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) continue;
+            if (!base32_decode(e.value(kFieldTotpSecret), key) || key.empty()) continue;
             int digits;
             uint32_t period;
             totp_settings(e, digits, period);
@@ -329,7 +363,7 @@ public:
             list_row(c, y, row_h - 1, first_ + i == sel_);
             text_small(c, 9, y + 3, fit(e->title, 18).c_str(), color::text);
             SBytes key;
-            if (!base32_decode(e->get_or(kFieldTotpSecret), key) || key.empty()) {
+            if (!base32_decode(e->value(kFieldTotpSecret), key) || key.empty()) {
                 text_small(c, 9, y + 14, "invalid secret", color::bad);
                 continue;
             }
