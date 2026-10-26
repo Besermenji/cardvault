@@ -228,6 +228,41 @@ void test_unlock_failure_refunds_attempt() {
     TEST_ASSERT_EQUAL(0, f.guard.failures());
 }
 
+void test_unlock_empty_passphrase_not_counted() {
+    Fixture f;
+    for (int i = 0; i < 12; i++) {
+        UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "");
+        TEST_ASSERT_EQUAL(int(UnlockResult::Empty), int(r.kind));
+    }
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    TEST_ASSERT_FALSE(f.session.is_open());
+}
+
+void test_unlock_empty_passphrase_with_exhausted_guard_must_wipe() {
+    Fixture f;
+    for (uint32_t i = 0; i < kMaxAttempts; i++) f.guard.begin_attempt();
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "");
+    TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe), int(r.kind));
+}
+
+void test_current_passphrase_check_counts_against_guard() {
+    // Settings > Change passphrase confirms the current passphrase with a
+    // scratch session while the vault stays open.
+    Fixture f;
+    f.session.unlock(f.store, "right horse battery");
+    VaultSession check;
+    UnlockResult r = unlock_attempt(f.guard, check, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Wrong), int(r.kind));
+    TEST_ASSERT_EQUAL(1, f.guard.failures());
+    TEST_ASSERT_TRUE(f.session.is_open());
+    r = unlock_attempt(f.guard, check, f.store, "right horse battery");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked), int(r.kind));
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    check.close();
+    for (uint32_t i = 0; i < kMaxAttempts; i++) r = unlock_attempt(f.guard, check, f.store, "guess");
+    TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe), int(r.kind));
+}
+
 // ---- Restore ----------------------------------------------------------------
 
 static std::vector<uint8_t> make_backup(const char* pass, int entries) {
@@ -267,6 +302,40 @@ void test_restore_wrong_passphrase_counts_while_locked() {
     TEST_ASSERT_EQUAL(1, f.guard.failures());
     for (int i = 0; i < 9; i++) c = restore_check(f.guard, true, backup, "wrong");
     TEST_ASSERT_EQUAL(int(RestoreCheck::MustWipe), int(c.kind));
+}
+
+void test_restore_empty_passphrase_not_counted() {
+    Fixture f;
+    auto backup = make_backup("backup pass", 1);
+    for (int i = 0; i < 12; i++) {
+        RestoreCheck c = restore_check(f.guard, true, backup, "");
+        TEST_ASSERT_EQUAL(int(RestoreCheck::Empty), int(c.kind));
+        c = restore_check(f.guard, false, backup, "");
+        TEST_ASSERT_EQUAL(int(RestoreCheck::Empty), int(c.kind));
+    }
+    TEST_ASSERT_EQUAL(0, f.guard.failures());
+    RestoreCheck c = restore_check(f.guard, true, backup, "backup pass");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::Ok), int(c.kind));
+}
+
+void test_restore_empty_passphrase_with_exhausted_guard_must_wipe() {
+    Fixture f;
+    auto backup = make_backup("backup pass", 1);
+    for (uint32_t i = 0; i < kMaxAttempts; i++) f.guard.begin_attempt();
+    RestoreCheck c = restore_check(f.guard, true, backup, "");
+    TEST_ASSERT_EQUAL(int(RestoreCheck::MustWipe), int(c.kind));
+}
+
+void test_restore_wrong_while_locked_reports_delay() {
+    Fixture f;
+    auto backup = make_backup("backup pass", 1);
+    for (uint32_t i = 1; i <= 5; i++) {
+        RestoreCheck c = restore_check(f.guard, true, backup, "wrong");
+        TEST_ASSERT_EQUAL(int(RestoreCheck::Wrong), int(c.kind));
+        TEST_ASSERT_EQUAL(attempt_delay_ms(i), c.retry_delay_ms);
+    }
+    RestoreCheck c = restore_check(f.guard, false, backup, "wrong");
+    TEST_ASSERT_EQUAL(0, c.retry_delay_ms);
 }
 
 void test_restore_while_unlocked_does_not_count() {
@@ -372,8 +441,14 @@ int main() {
     RUN_TEST(test_unlock_refused_when_counter_cannot_be_saved);
     RUN_TEST(test_unlock_damaged_vault);
     RUN_TEST(test_unlock_failure_refunds_attempt);
+    RUN_TEST(test_unlock_empty_passphrase_not_counted);
+    RUN_TEST(test_unlock_empty_passphrase_with_exhausted_guard_must_wipe);
+    RUN_TEST(test_current_passphrase_check_counts_against_guard);
     RUN_TEST(test_restore_declined_while_locked_does_not_reset_counter);
     RUN_TEST(test_restore_wrong_passphrase_counts_while_locked);
+    RUN_TEST(test_restore_empty_passphrase_not_counted);
+    RUN_TEST(test_restore_empty_passphrase_with_exhausted_guard_must_wipe);
+    RUN_TEST(test_restore_wrong_while_locked_reports_delay);
     RUN_TEST(test_restore_while_unlocked_does_not_count);
     RUN_TEST(test_restore_corrupt_image_refunds);
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);

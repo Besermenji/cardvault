@@ -4,10 +4,6 @@
 #include "core/flows.h"
 #include "ui/app.h"
 
-#ifndef CV_TEST_DELAY_DIV
-#define CV_TEST_DELAY_DIV 1
-#endif
-
 namespace cv {
 namespace ui {
 
@@ -80,12 +76,12 @@ public:
     const char* name() const override { return "unlock"; }
 #ifdef CV_TEST_HOOKS
     void debug(std::string& out) const override {
-        uint32_t wait = waiting() ? unlock_at_ - millis() : 0;
-        out = "len=" + std::to_string(pass_.size()) + " wait_ms=" + std::to_string(wait) +
+        out = "len=" + std::to_string(pass_.size()) +
+              " wait_ms=" + std::to_string(app().attempt_wait_ms()) +
               " error=" + (error_ ? error_ : "");
     }
 #endif
-    UnlockScreen() { schedule(); }
+    UnlockScreen() { app().arm_attempt_delay(); }
     ~UnlockScreen() override { wipe(pass_); }
 
     void on_key(const Key& k) override {
@@ -146,7 +142,7 @@ public:
         c.fillRoundRect(6, by, kW - 12, 22, 4, color::panel);
         c.drawRoundRect(6, by, kW - 12, 22, 4, waiting() ? color::line : color::accent);
         if (waiting()) {
-            uint32_t ms = unlock_at_ - millis();
+            uint32_t ms = app().attempt_wait_ms();
             char buf[40];
             unsigned secs = unsigned((ms + 999) / 1000);
             snprintf(buf, sizeof buf, "Wait %u:%02u", secs / 60, secs % 60);
@@ -173,18 +169,11 @@ public:
     }
 
 private:
-    bool waiting() const { return int32_t(unlock_at_ - millis()) > 0; }
-
-    void schedule() {
-        // Test builds shorten the real schedule (verified separately by host
-        // tests) so end-to-end runs don't take a quarter of an hour.
-        uint32_t d = app().guard.required_delay_ms() / CV_TEST_DELAY_DIV;
-        unlock_at_ = millis() + d;
-    }
+    bool waiting() const { return app().attempt_wait_ms() > 0; }
 
     void attempt() {
         App& a = app();
-        if (pass_.empty()) return;
+        if (pass_.empty()) return;  // unlock_attempt would refuse it too
         a.busy("Unlocking...");
         UnlockResult r = unlock_attempt(a.guard, a.session, a.store, pass_);
         wipe(pass_);
@@ -197,7 +186,7 @@ private:
                 a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
             case UnlockResult::Wrong:
                 error_ = "Wrong passphrase";
-                schedule();
+                a.arm_attempt_delay();
                 return;
             case UnlockResult::Damaged:
                 a.router.push(make_message("Vault damaged",
@@ -210,6 +199,8 @@ private:
                 return;
             case UnlockResult::Failed:
                 error_ = vault_error_str(r.error);
+                return;
+            case UnlockResult::Empty:
                 return;
         }
     }
@@ -234,7 +225,6 @@ private:
     SString pass_;
     bool reveal_ = false;
     bool blink_ = false;
-    uint32_t unlock_at_ = 0;
     uint32_t last_sec_ = 0;
     const char* error_ = nullptr;
 };

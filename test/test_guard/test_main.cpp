@@ -60,6 +60,20 @@ void test_refund_undoes_one_attempt() {
     TEST_ASSERT_EQUAL(1, g.failures());
 }
 
+void test_gate_waits_until_armed_delay_passes() {
+    AttemptGate gate;
+    TEST_ASSERT_EQUAL(0, gate.wait_ms(1234));
+    gate.arm(1000, 5000);
+    TEST_ASSERT_EQUAL(5000, gate.wait_ms(1000));
+    TEST_ASSERT_EQUAL(1, gate.wait_ms(5999));
+    TEST_ASSERT_EQUAL(0, gate.wait_ms(6000));
+    TEST_ASSERT_EQUAL(0, gate.wait_ms(90000));
+    // millis() wraps after ~49 days.
+    gate.arm(0xFFFFF000u, 0x2000);
+    TEST_ASSERT_EQUAL(0x1000, gate.wait_ms(0));
+    TEST_ASSERT_EQUAL(0, gate.wait_ms(0x1000));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_delay_schedule);
@@ -67,5 +81,6 @@ int main() {
     RUN_TEST(test_exhaustion_after_ten);
     RUN_TEST(test_refuses_when_counter_cannot_persist);
     RUN_TEST(test_refund_undoes_one_attempt);
+    RUN_TEST(test_gate_waits_until_armed_delay_passes);
     return UNITY_END();
 }

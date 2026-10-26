@@ -18,6 +18,7 @@ struct App {
     FlashStore store;
     NvsKv guard_kv{CV_NVS_GUARD};
     AttemptGuard guard{guard_kv};
+    AttemptGate gate;
     Settings settings;
     Router router;
     Canvas* canvas = nullptr;
@@ -42,6 +43,9 @@ struct App {
     void draw_toast(Canvas& c);
     bool toast_active() const;
     void apply_brightness();
+    // Starts the delay the guard requires before the next passphrase check.
+    void arm_attempt_delay();
+    uint32_t attempt_wait_ms() const;
 
     SString toast_msg;
     uint16_t toast_color = color::good;
@@ -94,6 +98,11 @@ ScreenPtr make_settings();
 
 // Asks for a new passphrase (with strength meter) twice; calls done on match.
 void ask_new_passphrase(const char* title, TextDone done);
+// Input options for typing an existing passphrase (current or backup).
+// Empty input is refused before any KDF runs or any attempt is counted.
+InputOpts existing_passphrase_opts(const char* hint);
+// True (after showing a toast) while the attempt guard's delay is running.
+bool attempt_delay_active();
 // Opens the clock-setting input; calls done after a valid time was set.
 void ask_set_time(std::function<void()> done = nullptr);
 // Picks a backup on the SD card and restores it (works while locked).

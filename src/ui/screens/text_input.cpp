@@ -133,7 +133,8 @@ private:
     void finish() {
         if (buf_.size() < o_.min_len) {
             char msg[40];
-            snprintf(msg, sizeof msg, "At least %u characters", unsigned(o_.min_len));
+            snprintf(msg, sizeof msg, "At least %u character%s", unsigned(o_.min_len),
+                     o_.min_len == 1 ? "" : "s");
             app().toast(msg, color::warn);
             return;
         }
@@ -298,6 +299,24 @@ ScreenPtr make_confirm(const char* title, const char* msg, std::function<void()>
 ScreenPtr make_message(const char* title, const char* msg, uint16_t accent,
                        std::function<void()> ok) {
     return ScreenPtr(new DialogScreen(title, msg, accent, false, std::move(ok)));
+}
+
+InputOpts existing_passphrase_opts(const char* hint) {
+    InputOpts o;
+    o.mask = true;
+    o.min_len = 1;
+    o.max_len = 128;
+    o.hint = hint;
+    return o;
+}
+
+bool attempt_delay_active() {
+    uint32_t ms = app().attempt_wait_ms();
+    if (ms == 0) return false;
+    char msg[40];
+    snprintf(msg, sizeof msg, "Too many tries. Wait %us", unsigned((ms + 999) / 1000));
+    app().toast(msg, color::warn, 2500);
+    return true;
 }
 
 void ask_new_passphrase(const char* title, TextDone done) {
