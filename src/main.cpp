@@ -5,6 +5,7 @@
 #include "core/messages.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
+#include "platform/nvs_kv.h"
 #include "test_hooks.h"
 #include "ui/app.h"
 
@@ -80,16 +81,27 @@ void setup() {
     clear(g_canvas);
     g_canvas.pushSprite(0, 0);
 
-    a.guard_kv.begin();
+    bool guard_ok = a.guard_kv.begin();
+#ifdef CV_NVS_GUARD_LEGACY
+    if (guard_ok) {
+        NvsKv legacy(CV_NVS_GUARD_LEGACY);
+        if (legacy.begin(true)) a.guard.adopt(legacy);
+    }
+#endif
     bool has_partition = FlashStore::has_partition();
     bool mounted = has_partition && a.store.begin();
-    switch (boot_route(has_partition, mounted, a.guard.exhausted(), mounted && a.store.exists())) {
+    switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),
+                       mounted && a.store.exists())) {
         case BootRoute::NoPartition:
             a.router.reset(make_message(
                 "No vault partition",
                 "This install has no 'vault' partition. Flash the full CardVault image, or "
                 "install the CardVault .bin with Launcher so its partition table is used.",
                 color::bad));
+            break;
+        case BootRoute::GuardUnavailable:
+            a.router.reset(make_message(msg::kGuardUnavailableTitle, msg::kGuardUnavailable,
+                                        color::bad));
             break;
         case BootRoute::StorageUnreadable:
             // Never format a non-blank partition silently: it may hold a damaged

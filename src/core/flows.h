@@ -15,16 +15,19 @@ namespace cv {
 
 enum class BootRoute {
     NoPartition,        // install has no "vault" partition
+    GuardUnavailable,   // attempt counter storage (NVS) cannot be opened
     StorageUnreadable,  // partition holds data we cannot mount; ask before formatting
     Wipe,               // attempt limit reached before a wipe completed (power cut)
     Unlock,
     Setup,
 };
 
-// An exhausted counter wins over everything but a missing partition: an
+// Without a working counter nothing else may run: every attempt would be
+// unguarded. After that an exhausted counter wins over everything: an
 // interrupted wipe may have left the partition unmountable, and the wipe
 // must finish before any prompt to format or set up.
-BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, bool vault_exists);
+BootRoute boot_route(bool has_partition, bool guard_ok, bool mounted, bool guard_exhausted,
+                     bool vault_exists);
 
 // ---- Wipe -------------------------------------------------------------------
 
@@ -47,14 +50,20 @@ struct UnlockResult {
         Unlocked,
         Wrong,     // wrong passphrase, more attempts left
         MustWipe,  // attempt limit reached: caller must erase the vault
-        Damaged,   // passphrase correct but vault data corrupted
-        Failed,    // could not check (out of memory, I/O): attempt refunded
+        Damaged,   // vault unreadable, or passphrase correct but data broken (see error)
+        Failed,    // could not finish; out of memory / I/O refunded (or, with
+                   // passphrase_ok, counted as success), anything else counted
         Refused,   // counter could not be persisted: attempt not made
         Empty,     // empty passphrase: not checked, not counted
     } kind;
     VaultError error = VaultError::Ok;
     uint32_t retry_delay_ms = 0;
+    bool passphrase_ok = false;  // data key unwrapped (set even when a later step failed)
 };
+
+// Explains an UnlockResult::Damaged outcome: what broke depends on `error`
+// and on whether the passphrase was verified first (payload) or not (header).
+const char* damaged_text(VaultError error, bool passphrase_ok);
 
 // Checks `pass` against the vault in `store`, counting the attempt. Also used
 // to confirm the current passphrase while unlocked (with a scratch session),
@@ -69,20 +78,22 @@ struct RestoreCheck {
         Ok,
         Wrong,     // wrong passphrase (counted only while locked)
         MustWipe,  // attempt limit reached: caller must erase the vault
-        Failed,    // could not check (bad image, out of memory): not counted
+        Failed,    // no verdict on the passphrase (bad image, out of memory, backup
+                   // damaged after its key unwrapped): not counted
         Refused,   // counter could not be persisted: attempt not made
         Empty,     // empty passphrase: not checked, not counted
     } kind;
     VaultError error = VaultError::Ok;
     size_t entries = 0;
-    uint32_t retry_delay_ms = 0;  // set for Wrong while locked
+    uint32_t retry_delay_ms = 0;  // set for a counted failure while locked
 };
 
 // Decrypts a backup image to verify the passphrase. While the device is
-// locked, attempts count against the guard like the unlock screen; a correct
-// backup passphrase only refunds its own attempt (it says nothing about the
-// device passphrase). An empty passphrase is rejected without running the KDF
-// or counting an attempt; an exhausted guard still yields MustWipe.
+// locked and holds a vault, attempts count against the guard like the unlock
+// screen; a correct backup passphrase only refunds its own attempt (it says
+// nothing about the device passphrase). A structurally invalid image and an
+// empty passphrase are rejected before any KDF or counting; an exhausted
+// guard still yields MustWipe.
 RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
                            const std::vector<uint8_t>& image, const SString& pass);
 

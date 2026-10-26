@@ -17,9 +17,69 @@ void test_delay_schedule() {
     TEST_ASSERT_EQUAL(300000, attempt_delay_ms(100));
 }
 
+void test_missing_counter_fails_closed() {
+    MemoryKv kv;  // nothing stored: NVS erased or never written
+    AttemptGuard g(kv);
+    TEST_ASSERT_EQUAL(kFailuresIfMissing, g.failures());
+    TEST_ASSERT_EQUAL(1, g.remaining());
+    TEST_ASSERT_FALSE(g.exhausted());  // not a wipe on its own
+    // The one attempt continues from the penalty and exhausts the guard.
+    TEST_ASSERT_TRUE(g.begin_attempt());
+    TEST_ASSERT_TRUE(g.exhausted());
+    // Creating a vault / a successful unlock writes a real value.
+    TEST_ASSERT_TRUE(g.reset());
+    TEST_ASSERT_EQUAL(0, g.failures());
+}
+
+void test_refund_never_lowers_an_unknown_counter() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    g.refund();  // missing: nothing was counted, nothing to undo
+    TEST_ASSERT_EQUAL(0, kv.values.count("fails"));
+    TEST_ASSERT_EQUAL(kFailuresIfMissing, g.failures());
+    kv.values["fails"] = 8;
+    kv.fail_reads = true;
+    g.refund();  // unreadable: must not write anything
+    kv.fail_reads = false;
+    TEST_ASSERT_EQUAL(8, g.failures());
+}
+
+void test_unreadable_counter_refuses_attempts_without_overwriting() {
+    MemoryKv kv;
+    kv.values["fails"] = 8;
+    kv.fail_reads = true;
+    AttemptGuard g(kv);
+    TEST_ASSERT_FALSE(g.begin_attempt());
+    TEST_ASSERT_FALSE(g.exhausted());  // unknown is not a reason to wipe
+    kv.fail_reads = false;
+    TEST_ASSERT_EQUAL(8, g.failures());  // stored value untouched
+}
+
+void test_adopts_legacy_counter_only_when_missing() {
+    MemoryKv legacy;
+    legacy.values["fails"] = 3;
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    TEST_ASSERT_TRUE(g.adopt(legacy));
+    TEST_ASSERT_EQUAL(3, g.failures());
+    // An existing counter always wins.
+    legacy.values["fails"] = 0;
+    TEST_ASSERT_FALSE(g.adopt(legacy));
+    TEST_ASSERT_EQUAL(3, g.failures());
+    // Nothing to adopt, or our own counter unreadable: no write.
+    MemoryKv empty, kv2;
+    AttemptGuard g2(kv2);
+    TEST_ASSERT_FALSE(g2.adopt(empty));
+    kv2.fail_reads = true;
+    TEST_ASSERT_FALSE(g2.adopt(legacy));
+    kv2.fail_reads = false;
+    TEST_ASSERT_EQUAL(0, kv2.values.count("fails"));
+}
+
 void test_counts_before_check_and_resets_on_success() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     TEST_ASSERT_EQUAL(0, g.failures());
     TEST_ASSERT_TRUE(g.begin_attempt());
     TEST_ASSERT_EQUAL(1, g.failures());
@@ -34,6 +94,7 @@ void test_counts_before_check_and_resets_on_success() {
 void test_exhaustion_after_ten() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     for (int i = 0; i < 10; i++) TEST_ASSERT_TRUE(g.begin_attempt());
     TEST_ASSERT_TRUE(g.exhausted());
     TEST_ASSERT_EQUAL(0, g.remaining());
@@ -52,6 +113,7 @@ void test_refuses_when_counter_cannot_persist() {
 void test_refund_undoes_one_attempt() {
     MemoryKv kv;
     AttemptGuard g(kv);
+    g.reset();
     g.refund();
     TEST_ASSERT_EQUAL(0, g.failures());
     g.begin_attempt();
@@ -88,6 +150,10 @@ void test_gate_waits_until_armed_delay_passes() {
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_delay_schedule);
+    RUN_TEST(test_missing_counter_fails_closed);
+    RUN_TEST(test_refund_never_lowers_an_unknown_counter);
+    RUN_TEST(test_unreadable_counter_refuses_attempts_without_overwriting);
+    RUN_TEST(test_adopts_legacy_counter_only_when_missing);
     RUN_TEST(test_counts_before_check_and_resets_on_success);
     RUN_TEST(test_exhaustion_after_ten);
     RUN_TEST(test_refuses_when_counter_cannot_persist);

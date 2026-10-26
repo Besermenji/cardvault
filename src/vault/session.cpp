@@ -59,8 +59,10 @@ VaultError VaultSession::unlock(BlobStore& store, const SString& pass) {
     return unlock_bytes(file, pass);
 }
 
-VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SString& pass) {
+VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SString& pass,
+                                      bool* key_ok) {
     close();
+    if (key_ok) *key_ok = false;
     if (pass.empty()) return VaultError::EmptyPassphrase;
     Header h;
     VaultError e = Header::decode(file.data(), file.size(), h);
@@ -72,6 +74,7 @@ VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SS
     Key32 dek;
     e = header_unwrap(h, kek.data(), dek.data());
     if (e != VaultError::Ok) return e;
+    if (key_ok) *key_ok = true;
 
     SBytes payload;
     e = open_file(file.data(), file.size(), dek.data(), payload);

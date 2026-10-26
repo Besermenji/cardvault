@@ -23,7 +23,10 @@ public:
     // Reads and decrypts the vault in `store`.
     VaultError unlock(BlobStore& store, const SString& pass);
     // Decrypts a vault image (e.g. an SD backup) and makes it this session.
-    VaultError unlock_bytes(const std::vector<uint8_t>& file, const SString& pass);
+    // `key_ok`, if given, is set once the data key unwrapped, i.e. the
+    // passphrase was right, even when a later step (payload) then fails.
+    VaultError unlock_bytes(const std::vector<uint8_t>& file, const SString& pass,
+                            bool* key_ok = nullptr);
     // Re-encrypts the current contents (fresh nonce) and writes to `store`.
     VaultError save(BlobStore& store);
     // New salt, new data key, new passphrase; then saves.

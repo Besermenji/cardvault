@@ -12,6 +12,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
 
 ### Security
+- The wrong-passphrase counter now fails closed. If no counter is stored while a vault exists (NVS
+  erased or damaged), the device allows one more attempt, after a 5-minute wait, instead of starting
+  from 0; a correct unlock restores a normal counter. A counter that cannot be read refuses unlocking
+  instead of reading as 0, and if the counter storage cannot be opened at boot, unlocking is disabled
+  with an explanation. The counter kept by v0.1.0-rc1 is carried over on upgrade.
+- Only storage and out-of-memory errors give an attempt back; every other error after the passphrase
+  check ran stays counted. Reading the vault file or its header costs no attempt. A vault whose
+  passphrase is right but whose payload cannot be read now counts as a correct passphrase, and the
+  message says what is wrong (corrupt data, newer format or unsupported settings), instead of
+  refunding one attempt.
 - A failed erase no longer resets the wrong-passphrase counter. Every wipe (10 wrong passphrases or
   "Erase vault") first saves the counter as exhausted and resets it only after the erase succeeds;
   a failed or interrupted wipe stops on an error screen and is retried on the next boot, even when

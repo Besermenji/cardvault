@@ -8,6 +8,9 @@
 // NVS namespaces. Test builds override them so they never touch real state.
 #ifndef CV_NVS_GUARD
 #define CV_NVS_GUARD "cv_guard"
+// Where v0.1.0-rc1 kept the counter; adopted once on upgrade. Not defined
+// for test builds, which must not read real state.
+#define CV_NVS_GUARD_LEGACY "guard"
 #endif
 #ifndef CV_NVS_CFG
 #define CV_NVS_CFG "cv_cfg"

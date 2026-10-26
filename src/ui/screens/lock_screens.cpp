@@ -196,9 +196,7 @@ private:
                 a.arm_attempt_delay();
                 return;
             case UnlockResult::Damaged:
-                a.router.push(make_message("Vault damaged",
-                                           "The passphrase is correct but the vault data is "
-                                           "corrupted. Restore a backup from SD (TAB menu).",
+                a.router.push(make_message("Vault damaged", damaged_text(r.error, r.passphrase_ok),
                                            color::bad));
                 return;
             case UnlockResult::Refused:
@@ -206,6 +204,7 @@ private:
                 return;
             case UnlockResult::Failed:
                 error_ = vault_error_str(r.error);
+                if (r.retry_delay_ms) a.arm_attempt_delay();  // counted: no free retries
                 return;
             case UnlockResult::Empty:
                 return;

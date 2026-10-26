@@ -21,6 +21,19 @@ constexpr const char* kWipeNotArmed =
 constexpr const char* kWipeRemount = "Storage will be set up again after the restart.";
 constexpr const char* kCounterNotReset = "Attempt counter not reset";
 
+constexpr const char* kGuardUnavailableTitle = "Counter unavailable";
+constexpr const char* kGuardUnavailable =
+    "The wrong-passphrase counter cannot be opened, so unlocking is disabled. "
+    "Power off and on. If this persists, reflash.";
+constexpr const char* kVaultUnreadable = "The vault file is unreadable. Restore a backup from SD (TAB menu).";
+constexpr const char* kVaultUnsupported =
+    "This vault uses settings this firmware cannot read. Update the firmware; if that does not "
+    "help, restore a backup.";
+constexpr const char* kVaultNewer =
+    "This vault was made by a newer CardVault. Update the firmware to open it.";
+constexpr const char* kPayloadDamaged =
+    "The passphrase is correct but the vault data is corrupted. Restore a backup from SD (TAB menu).";
+
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;
 
