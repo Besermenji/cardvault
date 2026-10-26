@@ -334,6 +334,26 @@ void test_wipe_string_clears_inline_buffer_and_dead_bytes() {
     }
 }
 
+void test_serialized_size_matches_serialize() {
+    VaultData d;
+    SBytes out;
+    serialize(d, out);
+    TEST_ASSERT_EQUAL(out.size(), serialized_size(d));  // empty vault
+    Entry m = make_entry(EntryType::Mnemonic, "Cold wallet");
+    m.set(kFieldWords, "abandon abandon about");
+    m.set(kFieldBip39Pass, "");
+    d.add(m);
+    Entry p = make_entry(EntryType::Password, "Mail \xC3\xA9");
+    p.set(kFieldUser, "me");
+    p.set(kFieldPassword, SString(300, 'p'));
+    d.add(p);
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(serialize(d, out)));
+    TEST_ASSERT_EQUAL(out.size(), serialized_size(d));
+    size_t per_entry = 0;
+    for (auto& e : d.entries) per_entry += entry_serialized_size(e);
+    TEST_ASSERT_EQUAL(out.size(), per_entry + 7);
+}
+
 void test_entry_value_returns_reference_or_empty() {
     Entry e = make_entry(EntryType::Password, "x");
     e.set(kFieldPassword, "pw");
@@ -419,6 +439,7 @@ int main() {
     RUN_TEST(test_kdf_check_retunes_before_writing);
     RUN_TEST(test_wipe_string_clears_inline_buffer_and_dead_bytes);
     RUN_TEST(test_entry_value_returns_reference_or_empty);
+    RUN_TEST(test_serialized_size_matches_serialize);
     RUN_TEST(test_vault_add_copies_and_keeps_source);
     RUN_TEST(test_remove_wipes_spare_capacity_of_entries);
     return UNITY_END();

@@ -172,11 +172,17 @@ public:
         header(c, "Generator", color::info);
         // Output
         c.fillRoundRect(4, kBodyY, kW - 8, 36, 4, color::panel);
-        const int cols = (kW - 16) / kMonoW;
-        auto lines = wrap(value_.data(), value_.size(), cols, !words_);
-        for (int i = 0; i < 2 && i < int(lines.size()); i++) {
+        // Two large lines when they fit, else small text (3 lines): every
+        // character of the longest output must be readable.
+        auto lines = wrap(value_.data(), value_.size(), kPwCols, !words_);
+        bool small = lines.size() > 2;
+        if (small) lines = wrap(value_.data(), value_.size(), kPwColsSmall, !words_);
+        for (int i = 0; i < 3 && i < int(lines.size()); i++) {
             SString s(value_.data() + lines[i].start, lines[i].len);
-            text_mono(c, 8, kBodyY + 2 + i * kMonoH, s.c_str());
+            if (small)
+                text_small(c, 8, kBodyY + 3 + i * 10, s.c_str(), color::text);
+            else
+                text_mono(c, 8, kBodyY + 2 + i * kMonoH, s.c_str());
             wipe(s);
         }
         double bits = words_ ? pwgen_words_bits(word_count_) : pwgen_password_bits(opt_);
@@ -214,6 +220,8 @@ public:
 
 private:
     static constexpr int kRows = 7;
+    static constexpr int kPwCols = (kW - 16) / kMonoW;       // 28, large font
+    static constexpr int kPwColsSmall = (kW - 16) / 6;       // 37, small font
 
     void change(int d) {
         switch (sel_) {

@@ -9,6 +9,7 @@
 #include "features/bip39.h"
 #include "features/totp.h"
 #include "ui/app.h"
+#include "vault/serializer.h"
 
 namespace cv {
 namespace ui {
@@ -96,9 +97,15 @@ public:
 
     void draw(Canvas& c) override {
         clear(c);
-        char title[32];
-        snprintf(title, sizeof title, "Vault  (%u)", unsigned(app().session.data().entries.size()));
-        header(c, title);
+        char title[40];
+        unsigned used = unsigned(serialized_size(app().session.data()) * 100 / kMaxPayload);
+        if (used >= 75)
+            snprintf(title, sizeof title, "Vault  (%u)  %u%% full",
+                     unsigned(app().session.data().entries.size()), used > 100 ? 100u : used);
+        else
+            snprintf(title, sizeof title, "Vault  (%u)",
+                     unsigned(app().session.data().entries.size()));
+        header(c, title, used >= 75 ? color::warn : color::accent);
         int y = kBodyY;
         if (!query_.empty()) {
             c.fillRoundRect(4, y, kW - 8, 13, 3, color::panel);
@@ -523,6 +530,20 @@ private:
         if (const char* err = finalize_entry(draft_, &warning)) {
             app().toast(err, color::bad);
             return;
+        }
+        // Say how much too big it is, instead of failing in the save below.
+        {
+            VaultData& data = app().session.data();
+            const Entry* old = data.find(id_);
+            size_t total = serialized_size(data) - (old ? entry_serialized_size(*old) : 0) +
+                           entry_serialized_size(draft_);
+            if (total > kMaxPayload) {
+                char msg[40];
+                snprintf(msg, sizeof msg, "Vault full: %u bytes too much",
+                         unsigned(total - kMaxPayload));
+                app().toast(msg, color::bad, 3000);
+                return;
+            }
         }
         uint32_t now = device::unix_time();
         draft_.updated = now;
