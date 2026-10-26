@@ -426,7 +426,8 @@ void start_mnemonic_flow(const SString& current, TextDone done) {
 }
 
 void ask_set_time(std::function<void()> done) {
-    char now[20] = "2026-01-01 12:00";
+    // Pre-fill the real time when the clock is set; never a made-up date.
+    char now[20] = "";
     if (device::time_valid()) {
         format_utc(device::unix_time(), now);
         now[16] = '\0';  // drop seconds
@@ -438,6 +439,11 @@ void ask_set_time(std::function<void()> done) {
         uint32_t t;
         if (!parse_utc(v.c_str(), t)) {
             app().toast("Invalid date/time", color::bad);
+            ask_set_time(done);
+            return;
+        }
+        if (t < kClockFloor) {
+            app().toast("Date before 2025-01-01", color::bad);
             ask_set_time(done);
             return;
         }

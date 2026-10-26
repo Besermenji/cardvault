@@ -8,12 +8,10 @@
 #include <esp_timer.h>
 #include <sys/time.h>
 
+#include "features/timeutil.h"
+
 namespace cv {
 namespace device {
-
-namespace {
-constexpr uint32_t kTimeFloor = 1735689600;  // 2025-01-01: anything earlier means "not set"
-}
 
 void radios_off() {
     // Wi-Fi and Bluetooth are never initialised by this firmware. Releasing
@@ -61,7 +59,7 @@ KdfTuning calibrate_kdf(uint32_t target_ms, uint32_t min_mem_kib) {
     }
 }
 
-bool time_valid() { return time(nullptr) >= time_t(kTimeFloor); }
+bool time_valid() { return time(nullptr) >= time_t(kClockFloor); }
 
 uint32_t unix_time() { return time_valid() ? uint32_t(time(nullptr)) : 0; }
 
