@@ -319,6 +319,55 @@ struct CountingStore : MemoryStore {
     }
 };
 
+// --- secret hygiene ------------------------------------------------------------
+
+void test_wipe_string_clears_inline_buffer_and_dead_bytes() {
+    SString s("hunter2-secret");  // fits the small-string buffer
+    const char* buf = s.data();
+    s.pop_back();
+    s.pop_back();  // bytes past size() still hold secret characters
+    wipe(s);
+    TEST_ASSERT_TRUE(s.empty());
+    // The inline buffer lives in the object; shrink_to_fit keeps it in place.
+    if (s.data() == buf) {
+        for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, uint8_t(buf[i]));
+    }
+}
+
+void test_entry_value_returns_reference_or_empty() {
+    Entry e = make_entry(EntryType::Password, "x");
+    e.set(kFieldPassword, "pw");
+    TEST_ASSERT_EQUAL_PTR(e.get(kFieldPassword), &e.value(kFieldPassword));
+    TEST_ASSERT_TRUE(e.value(kFieldUrl).empty());
+}
+
+void test_vault_add_copies_and_keeps_source() {
+    VaultData d;
+    Entry n = make_entry(EntryType::Note, "n");
+    n.set(kFieldBody, "text");
+    uint32_t id = d.add(n);
+    TEST_ASSERT_EQUAL(1, id);
+    TEST_ASSERT_EQUAL(2, d.next_id);
+    TEST_ASSERT_EQUAL_STRING("text", n.value(kFieldBody).c_str());  // source untouched
+    TEST_ASSERT_EQUAL(id, d.entries[0].id);
+    TEST_ASSERT_EQUAL(0, n.id);
+}
+
+void test_remove_wipes_spare_capacity_of_entries() {
+    VaultData d;
+    for (int i = 0; i < 3; i++) {
+        Entry n = make_entry(EntryType::Note, "tail-secret");
+        d.add(n);
+    }
+    const Entry* base = d.entries.data();
+    size_t cap = d.entries.capacity();
+    d.remove(d.entries[0].id);
+    TEST_ASSERT_EQUAL_PTR(base, d.entries.data());  // no reallocation
+    const uint8_t* raw = reinterpret_cast<const uint8_t*>(base + d.entries.size());
+    size_t n = (cap - d.entries.size()) * sizeof(Entry);
+    for (size_t i = 0; i < n; i++) TEST_ASSERT_EQUAL_UINT8(0, raw[i]);
+}
+
 void test_kdf_check_retunes_before_writing() {
     CountingStore store;
     VaultSession s;
@@ -368,5 +417,9 @@ int main() {
     RUN_TEST(test_check_layout_size_cap_edges);
     RUN_TEST(test_remove_entry);
     RUN_TEST(test_kdf_check_retunes_before_writing);
+    RUN_TEST(test_wipe_string_clears_inline_buffer_and_dead_bytes);
+    RUN_TEST(test_entry_value_returns_reference_or_empty);
+    RUN_TEST(test_vault_add_copies_and_keeps_source);
+    RUN_TEST(test_remove_wipes_spare_capacity_of_entries);
     return UNITY_END();
 }

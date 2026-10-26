@@ -25,7 +25,7 @@ bool icontains(const SString& hay, const SString& needle) {
 // Computes the current TOTP code for an entry. Returns false on bad secret.
 bool totp_now(const Entry& e, char* code, int& digits, uint32_t& period) {
     SBytes key;
-    if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) return false;
+    if (!base32_decode(e.value(kFieldTotpSecret), key) || key.empty()) return false;
     totp_settings(e, digits, period);
     uint32_t v = totp(key.data(), key.size(), device::unix_time(), period, digits);
     totp_format(v, digits, code);
@@ -260,8 +260,7 @@ public:
             int ry = y + i * row_h;
             list_row(c, ry, row_h - 1, idx == sel_);
             text_small(c, 9, ry + 2, field_label(f));
-            const SString* v = e->get(f);
-            SString value = v ? *v : SString();
+            const SString& value = e->value(f);
             bool hidden = field_is_secret(f) && !reveal_all_ && !(held_ && idx == sel_);
             if (value.empty()) {
                 text_mono(c, 9, ry + 8, "-", color::line);
@@ -269,9 +268,11 @@ public:
                 mask(c, 9, ry + 8, value.size(), 26);
             } else {
                 SString first_line = value.substr(0, value.find('\n'));
-                text_mono(c, 9, ry + 8, fit(first_line, 27).c_str());
+                SString shown = fit(first_line, 27);
+                text_mono(c, 9, ry + 8, shown.c_str());
+                wipe(first_line);
+                wipe(shown);
             }
-            wipe(value);
         }
         scrollbar(c, first_, visible, nf);
         footer(c, "SPACE peek  R reveal  ENTER  TAB more");
@@ -404,7 +405,7 @@ public:
             }
             uint8_t f = idx == 0 ? 0 : fields[idx - 1];
             text_small(c, 9, y + 1, idx == 0 ? "Title" : field_label(f));
-            SString v = idx == 0 ? draft_.title : draft_.get_or(f);
+            const SString& v = idx == 0 ? draft_.title : draft_.value(f);
             if (v.empty()) {
                 text_small(c, 9, y + 11, f == kFieldPassword ? "(empty - ENTER type, G generate)"
                                                              : "(empty - ENTER to edit)",
@@ -412,9 +413,10 @@ public:
             } else if (field_is_secret(f)) {
                 mask(c, 9, y + 9, v.size(), 26);
             } else {
-                text_small(c, 9, y + 11, fit(v, 37).c_str(), color::text);
+                SString shown = fit(v, 37);
+                text_small(c, 9, y + 11, shown.c_str(), color::text);
+                wipe(shown);
             }
-            wipe(v);
         }
         scrollbar(c, first_, visible, rows);
         footer(c, "ENTER edit  TAB to save  ` cancel");
@@ -434,14 +436,14 @@ private:
             return;
         }
         if (f == kFieldWords) {
-            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) { set_field(kFieldWords, v); });
+            start_mnemonic_flow(draft_.value(f), [this](SString& v) { set_field(kFieldWords, v); });
             return;
         }
         InputOpts o;
         o.multiline = field_is_multiline(f);
         o.mask = f == kFieldPassword || f == kFieldBip39Pass || f == kFieldTotpSecret;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
-        app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
+        app().router.push(make_text_input(field_label(f), draft_.value(f), o, [this, f](SString& v) {
             set_field(f, v);
         }));
     }
@@ -530,9 +532,9 @@ public:
 #endif
     explicit SeedViewScreen(uint32_t id) {
         if (const Entry* e = app().session.data().find(id)) {
-            words_ = bip39_split(e->get_or(kFieldWords));
-            status_ = bip39_validate(e->get_or(kFieldWords));
-            has_pass_ = !e->get_or(kFieldBip39Pass).empty();
+            words_ = bip39_split(e->value(kFieldWords));
+            status_ = bip39_validate(e->value(kFieldWords));
+            has_pass_ = !e->value(kFieldBip39Pass).empty();
         }
     }
     ~SeedViewScreen() override {
@@ -613,7 +615,7 @@ public:
 #endif
     TextViewScreen(uint32_t id, uint8_t field) : field_(field) {
         if (const Entry* e = app().session.data().find(id)) {
-            text_ = e->get_or(field);
+            text_ = e->value(field);
             title_ = e->title;
         }
     }

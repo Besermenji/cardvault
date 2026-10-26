@@ -13,6 +13,12 @@ SString Entry::get_or(uint8_t key, const char* fallback) const {
     return v ? *v : SString(fallback);
 }
 
+const SString& Entry::value(uint8_t key) const {
+    static const SString kEmpty;
+    const SString* v = get(key);
+    return v ? *v : kEmpty;
+}
+
 void Entry::set(uint8_t key, const SString& value) {
     for (auto& f : fields) {
         if (f.key == key) {
@@ -39,9 +45,9 @@ Entry* VaultData::find(uint32_t id) {
     return nullptr;
 }
 
-uint32_t VaultData::add(Entry e) {
-    e.id = next_id++;
-    entries.push_back(std::move(e));
+uint32_t VaultData::add(const Entry& e) {
+    entries.push_back(e);
+    entries.back().id = next_id++;
     return entries.back().id;
 }
 
@@ -50,6 +56,10 @@ bool VaultData::remove(uint32_t id) {
         if (it->id == id) {
             it->clear();
             entries.erase(it);
+            // erase() moves the tail down; the vacated slot keeps the moved-from
+            // strings, whose inline buffers hold copies. Zero the spare capacity.
+            wipe(entries.data() + entries.size(),
+                 (entries.capacity() - entries.size()) * sizeof(Entry));
             return true;
         }
     }

@@ -43,6 +43,8 @@ struct Entry {
 
     const SString* get(uint8_t key) const;
     SString get_or(uint8_t key, const char* fallback = "") const;
+    // The stored value, or an empty string: no copy, so use it for secrets.
+    const SString& value(uint8_t key) const;
     void set(uint8_t key, const SString& value);
     void clear();
 };
@@ -52,8 +54,8 @@ struct VaultData {
     SVec<Entry> entries;
 
     Entry* find(uint32_t id);
-    // Assigns a fresh id and stores the entry; returns the id.
-    uint32_t add(Entry e);
+    // Assigns a fresh id and stores a copy of the entry; returns the id.
+    uint32_t add(const Entry& e);
     bool remove(uint32_t id);
     void clear();
 };

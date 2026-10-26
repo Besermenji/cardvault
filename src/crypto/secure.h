@@ -39,13 +39,16 @@ using SBytes = std::vector<uint8_t, WipingAllocator<uint8_t>>;
 template <typename T>
 using SVec = std::vector<T, WipingAllocator<T>>;
 
-// Overwrite contents (including any small-string inline buffer) then clear.
+// Overwrite the whole buffer (the small-string inline buffer and any bytes
+// past size() left by erase/pop_back, not just the live contents), then clear.
 inline void wipe(SString& s) {
+    s.resize(s.capacity());  // never reallocates: n <= capacity
     if (!s.empty()) wipe(&s[0], s.size());
     s.clear();
     s.shrink_to_fit();
 }
 inline void wipe(SBytes& b) {
+    b.resize(b.capacity());
     wipe(b.data(), b.size());
     b.clear();
     b.shrink_to_fit();

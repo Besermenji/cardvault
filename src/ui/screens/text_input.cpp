@@ -99,6 +99,7 @@ public:
             } else {
                 SString s(buf_.data() + l.start, l.len);
                 text_mono(c, 6, y, s.c_str());
+                wipe(s);
             }
         }
         // Cursor

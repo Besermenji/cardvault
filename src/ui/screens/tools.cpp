@@ -271,7 +271,7 @@ public:
         for (auto& e : app().session.data().entries) {
             if (e.type != EntryType::Totp) continue;
             SBytes key;
-            if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) continue;
+            if (!base32_decode(e.value(kFieldTotpSecret), key) || key.empty()) continue;
             int digits;
             uint32_t period;
             totp_settings(e, digits, period);
@@ -329,7 +329,7 @@ public:
             list_row(c, y, row_h - 1, first_ + i == sel_);
             text_small(c, 9, y + 3, fit(e->title, 18).c_str(), color::text);
             SBytes key;
-            if (!base32_decode(e->get_or(kFieldTotpSecret), key) || key.empty()) {
+            if (!base32_decode(e->value(kFieldTotpSecret), key) || key.empty()) {
                 text_small(c, 9, y + 14, "invalid secret", color::bad);
                 continue;
             }
