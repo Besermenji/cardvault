@@ -483,8 +483,11 @@ def t14_change_passphrase(d):
     d.key("enter")
     d.type(P2)
     d.key("enter")
-    d.screen("message", "Passphrase changed", timeout=40)
-    d.key("enter")
+    # Success offers to compact (old copies still open with the old passphrase).
+    st = d.screen("confirm", "Passphrase changed", timeout=40)
+    check("OLD passphrase" in st.get("info", ""), f"compact offer missing: {st}")
+    d.key("n")  # compacting is covered on its own (needs an SD card)
+    d.screen("settings")
     d.cmd("g0")
     d.screen("unlock")
     d.type(P1)
