@@ -7,6 +7,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Secret hygiene (#39). A revealed secret hides again after 20 s, when the screen dims and when you
+  come back to the entry; ENTER on a secret row reveals just that row and does nothing on
+  Username/URL (R still reveals all, holding Space still peeks). The unlock, setup and restore
+  screens use the auto-lock time too: when idle, typed passphrases are wiped, open prompts close and
+  the screen dims. Strings are wiped over their whole buffer (inline buffer and leftover bytes
+  included), secrets are no longer copied for display, and the freed slot after deleting an entry is
+  zeroed. Stored auto-lock and brightness are clamped on load (30 s to 30 min, 20 to 255), so a bad
+  value cannot make the device unusable. The generator shows the whole password (up to 64
+  characters, 12 words); the vault shows how full it is (Settings > About, and in the list header
+  from 75 %) and a save that would not fit says by how many bytes.
 - Destructive and sloppy input paths now ask or validate (#38). Esc in a text input whose text
   differs from what it started with asks before discarding it, masked secrets included (passphrase
   prompts and typing ERASE still close at once). A free-text seed must contain a visible character

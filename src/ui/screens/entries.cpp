@@ -33,6 +33,12 @@ bool totp_now(const Entry& e, char* code, int& digits, uint32_t& period) {
     return true;
 }
 
+// `now` may predate the moment the reveal started (the loop reads the clock
+// before it handles keys), so compare as a signed difference.
+bool reveal_expired(uint32_t now, uint32_t revealed_at) {
+    return int32_t(now - revealed_at) >= int32_t(kRevealMs);
+}
+
 // Splits a TOTP code in two groups for readability ("123 456").
 void draw_code(Canvas& c, int cx, int cy, const char* code, int digits, uint16_t col) {
     char spaced[12];
@@ -233,7 +239,7 @@ public:
             held_ = held;
             invalidate();
         }
-        if ((reveal_all_ || row_ >= 0) && now - revealed_at_ >= kRevealMs) conceal();
+        if ((reveal_all_ || row_ >= 0) && reveal_expired(now, revealed_at_)) conceal();
         uint32_t sec = now / 1000;
         if (sec != last_sec_) {
             last_sec_ = sec;
@@ -606,7 +612,7 @@ public:
     }
 
     void tick(uint32_t now) override {
-        if (reveal_ && now - revealed_at_ >= kRevealMs) conceal();
+        if (reveal_ && reveal_expired(now, revealed_at_)) conceal();
         bool held = key_held(' ');
         if (held != held_) {
             held_ = held;
@@ -698,7 +704,7 @@ public:
     }
 
     void tick(uint32_t now) override {
-        if (reveal_ && now - revealed_at_ >= kRevealMs) conceal();
+        if (reveal_ && reveal_expired(now, revealed_at_)) conceal();
         bool held = key_held(' ');
         if (held != held_) {
             held_ = held;
