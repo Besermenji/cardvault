@@ -22,20 +22,41 @@ void format_duration(uint32_t s, char* buf, size_t n) {
 }
 
 void change_passphrase_flow() {
-    InputOpts o;
-    o.mask = true;
-    o.min_len = 1;
-    o.hint = "First confirm your current passphrase";
+    if (attempt_delay_active()) return;
+    InputOpts o = existing_passphrase_opts("First confirm your current passphrase");
     app().router.push(make_text_input("Current passphrase", "", o, [](SString& current) {
         App& a = app();
+        if (attempt_delay_active()) return;
         a.busy("Checking...");
-        std::vector<uint8_t> file;
+        // Counts against the guard like the unlock screen, so an unlocked
+        // device is no unlimited oracle for its own passphrase.
         VaultSession check;
-        VaultError e = a.store.read(file) ? check.unlock_bytes(file, current) : VaultError::Io;
+        UnlockResult r = unlock_attempt(a.guard, check, a.store, current);
         check.close();
-        if (e != VaultError::Ok) {
-            a.toast(vault_error_str(e), color::bad, 2500);
-            return;
+        switch (r.kind) {
+            case UnlockResult::Unlocked:
+                break;
+            case UnlockResult::MustWipe:
+                a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
+            case UnlockResult::Wrong: {
+                a.arm_attempt_delay();
+                char msg[48];
+                uint32_t left = a.guard.remaining();
+                snprintf(msg, sizeof msg, "Wrong passphrase (%u left)", unsigned(left));
+                a.toast(msg, color::bad, 2500);
+                return;
+            }
+            case UnlockResult::Damaged:
+                a.toast(vault_error_str(VaultError::Corrupt), color::bad, 2500);
+                return;
+            case UnlockResult::Refused:
+                a.toast("Storage error", color::bad, 2500);
+                return;
+            case UnlockResult::Failed:
+                a.toast(vault_error_str(r.error), color::bad, 2500);
+                return;
+            case UnlockResult::Empty:
+                return;
         }
         ask_new_passphrase("New passphrase", [](SString& next) {
             App& a = app();
@@ -174,14 +195,15 @@ void restore_from(const std::string& name) {
         app().router.push(make_message("Restore", vault_error_str(e), color::bad));
         return;
     }
-    InputOpts o;
-    o.mask = true;
-    o.min_len = 1;
-    o.hint = "Passphrase used when this backup was made";
+    // While locked, restore guesses share the unlock screen's delay.
+    if (!app().session.is_open() && attempt_delay_active()) return;
+    InputOpts o = existing_passphrase_opts("Passphrase used when this backup was made");
     app().router.push(make_text_input("Backup passphrase", "", o, [image](SString& pass) {
         App& a = app();
+        bool locked = !a.session.is_open();
+        if (locked && attempt_delay_active()) return;
         a.busy("Decrypting backup...");
-        RestoreCheck r = restore_check(a.guard, !a.session.is_open(), *image, pass);
+        RestoreCheck r = restore_check(a.guard, locked, *image, pass);
         switch (r.kind) {
             case RestoreCheck::MustWipe:
                 a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
@@ -189,8 +211,13 @@ void restore_from(const std::string& name) {
                 a.toast("Storage error", color::bad);
                 return;
             case RestoreCheck::Wrong:
+                if (locked) a.arm_attempt_delay();
+                a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
+                return;
             case RestoreCheck::Failed:
                 a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
+                return;
+            case RestoreCheck::Empty:
                 return;
             case RestoreCheck::Ok:
                 break;

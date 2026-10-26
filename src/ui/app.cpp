@@ -4,6 +4,10 @@
 
 #include <M5Cardputer.h>
 
+#ifndef CV_TEST_DELAY_DIV
+#define CV_TEST_DELAY_DIV 1
+#endif
+
 namespace cv {
 namespace ui {
 
@@ -78,6 +82,14 @@ void App::draw_toast(Canvas& c) {
     c.drawString(toast_msg.c_str(), kW / 2, y + h / 2);
     c.setTextDatum(top_left);
 }
+
+void App::arm_attempt_delay() {
+    // Test builds shorten the real schedule (verified separately by host
+    // tests) so end-to-end runs don't take a quarter of an hour.
+    gate.arm(millis(), guard.required_delay_ms() / CV_TEST_DELAY_DIV);
+}
+
+uint32_t App::attempt_wait_ms() const { return gate.wait_ms(millis()); }
 
 void App::apply_brightness() { M5Cardputer.Display.setBrightness(uint8_t(settings.brightness)); }
 

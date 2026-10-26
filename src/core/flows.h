@@ -33,27 +33,39 @@ struct UnlockResult {
         Damaged,   // passphrase correct but vault data corrupted
         Failed,    // could not check (out of memory, I/O): attempt refunded
         Refused,   // counter could not be persisted: attempt not made
+        Empty,     // empty passphrase: not checked, not counted
     } kind;
     VaultError error = VaultError::Ok;
     uint32_t retry_delay_ms = 0;
 };
 
+// Checks `pass` against the vault in `store`, counting the attempt. Also used
+// to confirm the current passphrase while unlocked (with a scratch session),
+// so that prompt is no unlimited guessing channel either.
 UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStore& store,
                             const SString& pass);
 
 // ---- Restore from backup ----------------------------------------------------
 
 struct RestoreCheck {
-    enum Kind { Ok, Wrong, MustWipe, Failed, Refused } kind;
+    enum Kind {
+        Ok,
+        Wrong,     // wrong passphrase (counted only while locked)
+        MustWipe,  // attempt limit reached: caller must erase the vault
+        Failed,    // could not check (bad image, out of memory): not counted
+        Refused,   // counter could not be persisted: attempt not made
+        Empty,     // empty passphrase: not checked, not counted
+    } kind;
     VaultError error = VaultError::Ok;
     size_t entries = 0;
+    uint32_t retry_delay_ms = 0;  // set for Wrong while locked
 };
 
 // Decrypts a backup image to verify the passphrase. While the device is
 // locked, attempts count against the guard like the unlock screen; a correct
 // backup passphrase only refunds its own attempt (it says nothing about the
 // device passphrase). An empty passphrase is rejected without running the KDF
-// or counting an attempt.
+// or counting an attempt; an exhausted guard still yields MustWipe.
 RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
                            const std::vector<uint8_t>& image, const SString& pass);
 

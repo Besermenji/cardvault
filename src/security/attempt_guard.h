@@ -40,4 +40,15 @@ private:
     KvStore& kv_;
 };
 
+// In-memory clock for attempt_delay_ms(), shared by every screen that checks
+// a guarded passphrase so none of them is a faster guessing channel.
+struct AttemptGate {
+    uint32_t ready_at = 0;
+    void arm(uint32_t now, uint32_t delay_ms) { ready_at = now + delay_ms; }
+    uint32_t wait_ms(uint32_t now) const {
+        int32_t d = int32_t(ready_at - now);
+        return d > 0 ? uint32_t(d) : 0;
+    }
+};
+
 }  // namespace cv

@@ -12,10 +12,15 @@ BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, boo
 UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStore& store,
                             const SString& pass) {
     UnlockResult r{UnlockResult::Refused};
-    if (!guard.begin_attempt()) {
-        r.kind = guard.exhausted() ? UnlockResult::MustWipe : UnlockResult::Refused;
+    if (guard.exhausted()) {
+        r.kind = UnlockResult::MustWipe;
         return r;
     }
+    if (pass.empty()) {
+        r.kind = UnlockResult::Empty;
+        return r;
+    }
+    if (!guard.begin_attempt()) return r;  // Refused
     r.error = session.unlock(store, pass);
     switch (r.error) {
         case VaultError::Ok:
@@ -47,16 +52,15 @@ UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStor
 RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
                            const std::vector<uint8_t>& image, const SString& pass) {
     RestoreCheck r{RestoreCheck::Refused};
+    if (device_locked && guard.exhausted()) {
+        r.kind = RestoreCheck::MustWipe;
+        return r;
+    }
     if (pass.empty()) {
-        // Not a guess: no KDF run, nothing counted.
-        r.kind = RestoreCheck::Failed;
-        r.error = VaultError::WrongPassphrase;
+        r.kind = RestoreCheck::Empty;
         return r;
     }
-    if (device_locked && !guard.begin_attempt()) {
-        r.kind = guard.exhausted() ? RestoreCheck::MustWipe : RestoreCheck::Refused;
-        return r;
-    }
+    if (device_locked && !guard.begin_attempt()) return r;  // Refused
     VaultSession tmp;
     r.error = tmp.unlock_bytes(image, pass);
     r.entries = tmp.data().entries.size();
@@ -71,7 +75,12 @@ RestoreCheck restore_check(AttemptGuard& guard, bool device_locked,
         r.kind = RestoreCheck::Failed;
         return r;
     }
-    r.kind = (device_locked && guard.exhausted()) ? RestoreCheck::MustWipe : RestoreCheck::Wrong;
+    if (device_locked && guard.exhausted()) {
+        r.kind = RestoreCheck::MustWipe;
+    } else {
+        r.kind = RestoreCheck::Wrong;
+        if (device_locked) r.retry_delay_ms = guard.required_delay_ms();
+    }
     return r;
 }
 
