@@ -282,6 +282,19 @@ def open_setting(d, row):
     d.key("enter")
 
 
+def empty_backup_passphrase_refused(d):
+    """Regression #32: ENTER and TAB on an empty Backup passphrase only warn.
+    No key is derived, no attempt is counted, the prompt stays open."""
+    d.screen("text_input", "Backup passphrase")
+    fails = d.state()["fails"]
+    for k in ("enter", "tab"):
+        d.key(k)
+        d.toast("At least 1")
+        st = d.screen("text_input", "Backup passphrase")
+        check(st["fails"] == fails, f"an empty backup passphrase must not count: {st}")
+        d.wait(lambda s: s["toast"] == "", "warning gone", 8)
+
+
 def backup_name_in(st):
     m = re.search(r"backup-\d+\.cvb", info(st).get("msg", ""))
     check(m is not None, f"no backup file name in: {st}")
@@ -794,7 +807,7 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    empty_backup_passphrase_refused(d)  # unlocked
     d.type("not the backup pass")
     d.key("enter")
     st = d.screen("message", "Restore failed", timeout=30)
@@ -823,7 +836,7 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    empty_backup_passphrase_refused(d)  # locked: nothing is open yet
     d.type(P3)
     d.key("enter")
     d.screen("confirm", "Replace vault?", timeout=30)
@@ -1030,6 +1043,18 @@ def t22_confirm_and_validation(d):
     finally:
         d.cmd(f"settime {int(time.time())}")
 
+    # With the clock set, Set clock starts from the real time (YYYY-MM-DD HH:MM).
+    d.key("tab")
+    d.menu_pick("2FA codes")
+    d.screen("totp_list")
+    d.key("t")
+    st = d.screen("text_input", "Set clock (UTC)")
+    check(info(st)["len"] == "16", f"clock input must start from the current time: {st}")
+    d.key("esc")  # untouched: closes without a question
+    d.screen("totp_list")
+    d.key("esc")
+    go_home(d)
+
 
 def t23_secret_hygiene(d):
     # Regression #39: ENTER reveals one secret row only, reveals time out
@@ -1167,6 +1192,139 @@ def t23_secret_hygiene(d):
     d.key("down")
     d.wait(lambda s: not s["dimmed"], "wake")
     d.unlock(pw)
+
+
+def t24_tab_cascade_and_clear_field(d):
+    # Regression #31: TAB must never create, change or delete data on any
+    # screen, and clearing a stored optional field asks first and sticks.
+    pw = P3 if SD_CARD else P1
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+
+    def storm(what, times=8):
+        before = d.dump()
+        fails = d.state()["fails"]
+        d.key("tab", times)
+        st = d.state()  # still answering: nothing crashed or restarted
+        check(st["open"] and st["fails"] == fails, f"TAB on {what} changed state: {st}")
+        check(d.dump() == before, f"TAB on {what} created, changed or deleted data")
+        go_home(d)
+
+    # Menus and tools.
+    d.key("tab")
+    d.screen("menu", "Menu")
+    storm("the main menu")
+    d.key("tab")
+    d.menu_pick("Settings")
+    d.screen("settings")
+    storm("settings")
+    d.key("tab")
+    d.menu_pick("2FA codes")
+    d.screen("totp_list")
+    storm("the 2FA list")
+    d.key("tab")
+    d.menu_pick("Password generator")
+    d.screen("pwgen")
+    storm("the password generator")
+
+    # Every editor, then the inputs reached from them.
+    for label in ("Seed phrase", "Password", "2FA (TOTP)", "Note"):
+        new_entry(d, label)
+        storm(f"the {label} editor")
+    new_entry(d, "Note")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    storm("a text input")
+    new_entry(d, "Seed phrase")
+    d.key("down")
+    d.key("enter")
+    d.menu_pick("Type 12 words")
+    d.screen("mnemonic_input")
+    storm("the seed word input")
+
+    # A saved entry: its viewer and its action menu.
+    new_entry(d, "Note")
+    set_title(d, "TabNote")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("tab test")
+    d.key("enter")
+    save_entry(d)
+    d.screen("entry_view")
+    storm("the entry viewer")
+    check(any(e["title"] == "TabNote" for e in d.dump()), "the test note was not saved")
+
+    # Clearing a stored optional field: asks, and a yes sticks across a reboot.
+    new_entry(d, "Password")
+    set_title(d, "ClearMe")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.type("alice")
+    d.key("enter")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type("hunter22")
+    d.key("enter")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("down")  # Username
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.key("bs", 5)
+    d.key("enter")
+    d.screen("confirm", "Clear Username?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "1", f"a confirmed clear must change the draft: {st}")
+    save_entry(d)
+    d.screen("entry_view")
+
+    new_entry(d, "2FA (TOTP)")
+    d.key("down")  # Issuer
+    d.key("enter")
+    d.screen("text_input", "Issuer")
+    d.type("Acme")
+    d.key("enter")
+    d.key("down")  # Secret
+    d.key("enter")
+    d.screen("text_input", "Secret (base32)")
+    d.type(TOTP_SECRET)
+    d.key("enter")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("down")  # Issuer
+    d.key("enter")
+    d.screen("text_input", "Issuer")
+    d.key("bs", 4)
+    d.key("enter")
+    d.screen("confirm", "Clear Issuer?")
+    d.key("y")
+    save_entry(d)
+    d.screen("entry_view")
+
+    def cleared():
+        by_title = {e["title"]: e for e in d.dump()}
+        me = by_title.get("ClearMe")
+        acme = by_title.get("Acme")
+        check(me is not None and acme is not None, f"entries missing: {list(by_title)}")
+        check(me["fields"].get("4", "") == "" and me["fields"]["5"] == "hunter22",
+              f"username must be cleared, password kept: {me}")
+        check(acme["fields"].get("11", "") == "" and acme["fields"]["8"] == TOTP_SECRET,
+              f"issuer must be cleared, secret kept: {acme}")
+
+    cleared()
+    d.restart_cmd("reboot")
+    d.unlock(pw)
+    cleared()
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]

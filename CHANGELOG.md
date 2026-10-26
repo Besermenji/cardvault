@@ -76,6 +76,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the vault, allowing unlimited guesses. The counter now resets only after a restore completes.
 - Vault entries are deserialized in place so short secrets are not left in stack temporaries.
 
+### Tests
+- Regression coverage for the audit findings (#42). Host: the vendored Argon2id is checked against
+  the RFC 9106 vector and our wrapper against libargon2; freed `SString`/`SBytes`/`SVec` buffers
+  and `SecretBox`/`SecretKey` are checked to be zero (a heap watcher sees each block as it is
+  freed); every header field (version, KDF id, memory, passes, work cap) is tampered with and must
+  be refused before any key is derived and without costing an attempt. e2e: serial requests carry
+  ids, so a late reply can no longer be taken for the next answer, and `key`/`type` wait for a
+  `sync` barrier so a queued key is never dropped behind one that changes the screen; a `storage`
+  hook reads the real vault files, scans the raw partition for leftover vault bytes and reads the
+  attempt counter, so the wipe checks (factory, ten wrong passphrases, ERASE) prove the flash was
+  emptied; new scenarios for TAB on every screen, an empty backup passphrase, confirmed clearing of
+  a stored field and the Set clock default.
+
+
 ## [0.1.0] - 2026-10-20
 
 ### Added
