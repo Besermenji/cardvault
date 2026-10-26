@@ -977,6 +977,98 @@ def t22_confirm_and_validation(d):
         d.cmd(f"settime {int(time.time())}")
 
 
+def t23_secret_hygiene(d):
+    # Regression #39: ENTER reveals one secret row only, reveals time out
+    # (4 s in the e2e build) and hide on resume and dim, and locked screens
+    # drop typed input when idle.
+    pw = P3 if SD_CARD else P1  # see t22
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+    title = f"Hyg{int(time.time()) % 100000}"
+    new_entry(d, "Password")
+    set_title(d, title)
+    d.key("down")  # Username
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.type("someone")
+    d.key("enter")
+    d.screen("entry_edit")
+    d.key("down")  # Password
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type("pw-secret-1")
+    d.key("enter")
+    d.screen("entry_edit")
+    save_entry(d)
+    st = d.screen("entry_view")
+    check(info(st)["reveal_all"] == "0" and info(st)["row"] == "-1", f"starts masked: {st}")
+
+    # ENTER on Username (not a secret): nothing is revealed.
+    d.key("enter")
+    st = d.state()
+    check(info(st)["reveal_all"] == "0" and info(st)["row"] == "-1",
+          f"ENTER on a non-secret row must reveal nothing: {st}")
+
+    # ENTER on Password reveals only that row, then it hides by itself.
+    d.key("down")
+    d.key("enter")
+    st = d.state()
+    check(info(st)["row"] == "1" and info(st)["reveal_all"] == "0", f"one row only: {st}")
+    d.wait(lambda s: info(s)["row"] == "-1", "revealed row hides after the timeout", timeout=10)
+
+    # R reveals all, hidden again by the timeout.
+    d.key("r")
+    check(info(d.state())["reveal_all"] == "1", "R should reveal all")
+    d.wait(lambda s: info(s)["reveal_all"] == "0", "R reveal hides after the timeout", timeout=10)
+
+    # Coming back from another screen starts masked.
+    d.key("r")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("esc")
+    st = d.screen("entry_view")
+    check(info(st)["reveal_all"] == "0", f"reveal must not survive leaving the screen: {st}")
+
+    # Dimming hides it too.
+    d.key("r")
+    d.cmd("idle 111000")  # default auto-lock 120 s, dims 10 s before
+    st = d.wait(lambda s: s["dimmed"], "screen dims")
+    check(info(st)["reveal_all"] == "0", f"dim must hide revealed secrets: {st}")
+    d.key("down")  # the waking key press is swallowed
+    d.wait(lambda s: not s["dimmed"], "key wakes the screen")
+
+    # Delete the test entry again.
+    d.key("tab")
+    d.menu_pick("Delete")
+    d.screen("confirm", "Delete secret?")
+    d.key("y")
+    go_home(d)
+
+    # Locked: a typed (and revealed) passphrase is dropped when idle.
+    d.lock()
+    d.type("half typed")
+    d.key("opt")
+    check(info(d.state())["len"] == "10", "passphrase typed")
+    d.cmd("idle 121000")
+    st = d.wait(lambda s: s["dimmed"], "locked screen dims when idle")
+    check(info(st)["len"] == "0", f"idle must wipe the typed passphrase: {st}")
+    d.key("down")  # swallowed: wakes the screen
+    d.wait(lambda s: not s["dimmed"], "key wakes the locked screen")
+
+    # Open prompts above the lock screen are closed too.
+    d.key("tab")
+    d.menu_pick("Erase vault")
+    d.screen("text_input", "Erase vault")
+    d.type("ERA")
+    d.cmd("idle 121000")
+    st = d.wait(lambda s: s["dimmed"], "prompt closes when idle")
+    check(st["screen"] == "unlock" and st["depth"] == 1, f"back on the lock screen: {st}")
+    d.key("down")
+    d.wait(lambda s: not s["dimmed"], "wake")
+    d.unlock(pw)
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 
