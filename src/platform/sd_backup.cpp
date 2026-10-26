@@ -5,6 +5,9 @@
 
 #include <algorithm>
 
+#include "core/backup_names.h"
+#include "vault/format.h"
+
 namespace cv {
 namespace sd {
 
@@ -43,28 +46,32 @@ std::vector<std::string> list_backups() {
         f.close();
     }
     dir.close();
-    std::sort(names.rbegin(), names.rend());
+    sort_backups(names);
     return names;
 }
 
 bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
+    if (image.empty() || image.size() > kMaxFileSize) return false;
     if (!mount()) return false;
-    int next = 1;
-    for (auto& n : list_backups()) {
-        int v = atoi(n.c_str() + 7);  // "backup-0001.cvb"
-        if (n.rfind("backup-", 0) == 0 && v >= next) next = v + 1;
+    long number = next_backup_number(list_backups());
+    if (number < 0) return false;
+    // Never reuse a name that exists (even one list_backups did not show): a
+    // backup must not overwrite or extend an older one.
+    std::string path;
+    for (int tries = 0;; tries++, number++) {
+        if (tries == 100) return false;
+        name = backup_name(number);
+        path = std::string(kDir) + "/" + name;
+        if (!SD.exists(path.c_str())) break;
     }
-    char buf[32];
-    snprintf(buf, sizeof buf, "backup-%04d.cvb", next);
-    name = buf;
-    std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_WRITE);
     if (!f) return false;
     size_t n = f.write(image.data(), image.size());
     f.close();
-    if (n != image.size()) return false;
     std::vector<uint8_t> check;
-    return read_backup(name, check) && check == image;
+    if (n == image.size() && read_backup(name, check) && check == image) return true;
+    SD.remove(path.c_str());  // never leave a partial or unverified backup behind
+    return false;
 }
 
 bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
@@ -72,7 +79,13 @@ bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
     std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_READ);
     if (!f) return false;
-    out.resize(f.size());
+    // Cap before allocating: a huge file must not exhaust the heap.
+    size_t size = f.size();
+    if (size == 0 || size > kMaxFileSize) {
+        f.close();
+        return false;
+    }
+    out.resize(size);
     size_t n = f.read(out.data(), out.size());
     f.close();
     return n == out.size();

@@ -8,10 +8,12 @@
 #include <cstring>
 #include <LittleFS.h>
 #include <M5Cardputer.h>
+#include <SD.h>
 #include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <unity.h>
 
+#include "core/backup_names.h"
 #include "core/flows.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
@@ -390,6 +392,40 @@ void test_sd_backup_roundtrip() {
     sd::unmount();
 }
 
+void test_sd_numbering_never_overwrites_and_caps_reads() {
+    if (!sd::mount()) TEST_IGNORE_MESSAGE("no working SD card inserted");
+    std::vector<uint8_t> a(3000), b(3000), back;
+    rng_fill(a.data(), a.size());
+    rng_fill(b.data(), b.size());
+    std::string na, nb;
+    TEST_ASSERT_TRUE(sd::write_backup(a, na));
+    // Unmounted in between, like the UI does after every operation.
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::write_backup(b, nb));
+    TEST_ASSERT_TRUE(na != nb);
+    TEST_ASSERT_EQUAL(backup_number(na) + 1, backup_number(nb));
+    TEST_ASSERT_TRUE(sd::read_backup(na, back) && back == a);  // first one intact
+    TEST_ASSERT_TRUE(sd::read_backup(nb, back) && back == b);
+
+    // A file past the size cap is refused without being loaded.
+    std::string big = backup_name(99990000);
+    File f = SD.open((std::string("/cardvault/") + big).c_str(), FILE_WRITE);
+    TEST_ASSERT_TRUE(bool(f));
+    std::vector<uint8_t> chunk(4096, 0xAB);
+    for (size_t w = 0; w <= kMaxFileSize; w += chunk.size()) f.write(chunk.data(), chunk.size());
+    f.close();
+    back.clear();
+    TEST_ASSERT_FALSE(sd::read_backup(big, back));
+    TEST_ASSERT_EQUAL(0, back.size());
+
+    TEST_ASSERT_TRUE(sd::remove_backup(big));
+    TEST_ASSERT_TRUE(sd::remove_backup(na));
+    TEST_ASSERT_TRUE(sd::remove_backup(nb));
+    sd::unmount();
+    TEST_ASSERT_TRUE(sd::mount());  // remount after unmount works
+    sd::unmount();
+}
+
 void setup() {
     delay(2500);  // let the USB serial port come up
     auto cfg = M5.config();
@@ -414,6 +450,7 @@ void setup() {
         RUN_TEST(test_hw_rng_output_looks_random);
         RUN_TEST(test_battery_reading_survives_rng_use);
         RUN_TEST(test_sd_backup_roundtrip);
+        RUN_TEST(test_sd_numbering_never_overwrites_and_caps_reads);
         erase_vault_partition();
     }
     UNITY_END();

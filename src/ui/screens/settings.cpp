@@ -214,7 +214,9 @@ bool restore_guarded() { return !app().session.is_open() && app().store.exists()
 
 void restore_from(const std::string& name) {
     auto image = std::make_shared<std::vector<uint8_t>>();
-    if (!sd::read_backup(name, *image)) {
+    bool read_ok = sd::read_backup(name, *image);
+    sd::unmount();  // the image is in RAM; the card is not needed any more
+    if (!read_ok) {
         app().router.push(make_message("Restore", "Could not read the backup file.", color::bad));
         return;
     }
@@ -283,6 +285,7 @@ void start_backup_flow() {
                                        color::warn));
         return;
     }
+    sd::unmount();  // only probed: the passphrase prompt can be cancelled
     ask_new_passphrase("Backup passphrase", [](SString& pass) {
         App& a = app();
         a.busy("Encrypting backup...");
@@ -316,8 +319,8 @@ void start_restore_flow() {
         return;
     }
     auto names = sd::list_backups();
+    sd::unmount();  // menu entries only hold names; reading mounts again
     if (names.empty()) {
-        sd::unmount();
         app().router.push(make_message("No backups", "No .cvb files found in /cardvault on the SD card.",
                                        color::warn));
         return;

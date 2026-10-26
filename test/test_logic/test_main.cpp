@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "core/backup_names.h"
 #include "core/entry_rules.h"
 #include "core/messages.h"
 #include "core/mnemonic_entry.h"
@@ -424,8 +425,41 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }
 
+void test_backup_names_parse_strictly() {
+    TEST_ASSERT_EQUAL(1, backup_number("backup-0001.cvb"));
+    TEST_ASSERT_EQUAL(10000, backup_number("backup-10000.cvb"));
+    TEST_ASSERT_EQUAL(12, backup_number("backup-12.cvb"));
+    TEST_ASSERT_EQUAL(-1, backup_number("backup-.cvb"));
+    TEST_ASSERT_EQUAL(-1, backup_number("backup-12a.cvb"));
+    TEST_ASSERT_EQUAL(-1, backup_number("backup-0001.cvb.bak"));
+    TEST_ASSERT_EQUAL(-1, backup_number("mybackup-0001.cvb"));
+    TEST_ASSERT_EQUAL(-1, backup_number("backup-123456789.cvb"));  // would overflow atoi-style parsing
+    TEST_ASSERT_EQUAL(-1, backup_number("old.cvb"));
+    TEST_ASSERT_EQUAL_STRING("backup-0007.cvb", backup_name(7).c_str());
+    TEST_ASSERT_EQUAL_STRING("backup-10000.cvb", backup_name(10000).c_str());
+}
+
+void test_backup_sort_is_numeric_newest_first() {
+    std::vector<std::string> v = {"backup-9999.cvb", "zzz.cvb", "backup-10000.cvb", "backup-0002.cvb",
+                                  "aaa.cvb", "backup-10001.cvb"};
+    sort_backups(v);
+    std::vector<std::string> want = {"backup-10001.cvb", "backup-10000.cvb", "backup-9999.cvb",
+                                     "backup-0002.cvb",  "aaa.cvb",          "zzz.cvb"};
+    TEST_ASSERT_TRUE(v == want);
+}
+
+void test_next_backup_number_skips_used_and_ignores_junk() {
+    TEST_ASSERT_EQUAL(1, next_backup_number({}));
+    TEST_ASSERT_EQUAL(1, next_backup_number({"old.cvb", "backup-x.cvb"}));
+    TEST_ASSERT_EQUAL(10000, next_backup_number({"backup-9999.cvb", "backup-0003.cvb"}));
+    TEST_ASSERT_EQUAL(-1, next_backup_number({"backup-99999999.cvb"}));
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_backup_names_parse_strictly);
+    RUN_TEST(test_backup_sort_is_numeric_newest_first);
+    RUN_TEST(test_next_backup_number_skips_used_and_ignores_junk);
     RUN_TEST(test_mnemonic_autoaccepts_unique_four_letter_prefix);
     RUN_TEST(test_mnemonic_full_phrase_completes_and_validates);
     RUN_TEST(test_mnemonic_short_words_need_enter_and_selection);
