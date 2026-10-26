@@ -21,7 +21,7 @@ public:
     // Creates an empty vault protected by `pass` and writes it to `store`.
     VaultError create(BlobStore& store, const SString& pass, const KdfParams& kdf);
     // Reads and decrypts the vault in `store`.
-    VaultError unlock(BlobStore& store, const SString& pass, bool* key_ok = nullptr);
+    VaultError unlock(BlobStore& store, const SString& pass);
     // Decrypts a vault image (e.g. an SD backup) and makes it this session.
     // `key_ok`, if given, is set once the data key unwrapped, i.e. the
     // passphrase was right, even when a later step (payload) then fails.

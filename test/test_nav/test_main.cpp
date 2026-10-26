@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/flows.h"
+#include "core/messages.h"
 #include "crypto/kdf.h"
 #include "vault/serializer.h"
 
@@ -515,6 +516,7 @@ void test_unlock_payload_version_error_counts_as_correct_passphrase() {
     UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "right horse battery");
     TEST_ASSERT_EQUAL(int(UnlockResult::Damaged), int(r.kind));
     TEST_ASSERT_EQUAL(int(VaultError::UnsupportedVersion), int(r.error));
+    TEST_ASSERT_TRUE(r.passphrase_ok);
     TEST_ASSERT_FALSE(f.session.is_open());
     TEST_ASSERT_EQUAL(0, f.guard.failures());  // success, not a refund of one attempt
     // A wrong passphrase on the same vault still counts.
@@ -530,6 +532,7 @@ void test_unlock_unreadable_header_costs_nothing() {
         UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
         TEST_ASSERT_EQUAL(int(UnlockResult::Damaged), int(r.kind));
         TEST_ASSERT_EQUAL(int(VaultError::BadMagic), int(r.error));
+        TEST_ASSERT_FALSE(r.passphrase_ok);
     }
     TEST_ASSERT_EQUAL(0, f.guard.failures());
     f.store.blob.resize(10);
@@ -547,22 +550,40 @@ void test_unlock_io_error_never_touches_counter() {
     TEST_ASSERT_EQUAL(int(VaultError::Io), int(r.error));
 }
 
-void test_unlock_with_counter_missing_starts_at_five_failures() {
+void test_unlock_with_counter_missing_allows_one_guess() {
     Fixture f;
     f.kv.values.clear();  // NVS wiped while the vault stayed
     TEST_ASSERT_EQUAL(int(kFailuresIfMissing), int(f.guard.failures()));
     UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
-    TEST_ASSERT_EQUAL(int(UnlockResult::Wrong), int(r.kind));
-    TEST_ASSERT_EQUAL(kFailuresIfMissing + 1, f.guard.failures());
-    for (int i = 0; i < 3; i++) unlock_attempt(f.guard, f.session, f.store, "guess");
-    TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe),
-                      int(unlock_attempt(f.guard, f.session, f.store, "guess").kind));
-    // One right answer restores a real counter.
+    TEST_ASSERT_EQUAL(int(UnlockResult::MustWipe), int(r.kind));
+    // The one guess may also be the right one, which restores a real counter.
     f.kv.values.clear();
     TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
                       int(unlock_attempt(f.guard, f.session, f.store, "right horse battery").kind));
     TEST_ASSERT_EQUAL(0, f.guard.failures());
-    TEST_ASSERT_TRUE(f.kv.values.count("fails"));
+    TEST_ASSERT_EQUAL(1, f.kv.values.count("fails"));
+}
+
+void test_unlock_refused_when_counter_unreadable() {
+    Fixture f;
+    f.kv.values["fails"] = 9;
+    f.kv.fail_reads = true;
+    UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "right horse battery");
+    TEST_ASSERT_EQUAL(int(UnlockResult::Refused), int(r.kind));
+    TEST_ASSERT_FALSE(f.session.is_open());
+    f.kv.fail_reads = false;
+    TEST_ASSERT_EQUAL(9, f.guard.failures());
+}
+
+void test_damaged_text_by_stage_and_error() {
+    TEST_ASSERT_EQUAL_STRING(msg::kPayloadDamaged, damaged_text(VaultError::Corrupt, true));
+    // After the key unwrapped, any payload error means broken data.
+    TEST_ASSERT_EQUAL_STRING(msg::kPayloadDamaged, damaged_text(VaultError::Truncated, true));
+    TEST_ASSERT_EQUAL_STRING(msg::kVaultNewer, damaged_text(VaultError::UnsupportedVersion, true));
+    TEST_ASSERT_EQUAL_STRING(msg::kVaultNewer, damaged_text(VaultError::UnsupportedVersion, false));
+    TEST_ASSERT_EQUAL_STRING(msg::kVaultUnsupported, damaged_text(VaultError::BadParams, false));
+    TEST_ASSERT_EQUAL_STRING(msg::kVaultUnreadable, damaged_text(VaultError::BadMagic, false));
+    TEST_ASSERT_EQUAL_STRING(msg::kVaultUnreadable, damaged_text(VaultError::Truncated, false));
 }
 
 void test_restore_unreadable_image_costs_nothing_even_when_locked() {
@@ -699,7 +720,9 @@ int main() {
     RUN_TEST(test_unlock_payload_version_error_counts_as_correct_passphrase);
     RUN_TEST(test_unlock_unreadable_header_costs_nothing);
     RUN_TEST(test_unlock_io_error_never_touches_counter);
-    RUN_TEST(test_unlock_with_counter_missing_starts_at_five_failures);
+    RUN_TEST(test_unlock_with_counter_missing_allows_one_guess);
+    RUN_TEST(test_unlock_refused_when_counter_unreadable);
+    RUN_TEST(test_damaged_text_by_stage_and_error);
     RUN_TEST(test_restore_unreadable_image_costs_nothing_even_when_locked);
     RUN_TEST(test_restore_backup_with_broken_payload_refunds);
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);

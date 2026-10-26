@@ -31,11 +31,11 @@ bool refundable(VaultError e) { return e == VaultError::OutOfMemory || e == Vaul
 
 }  // namespace
 
-const char* damaged_text(VaultError error) {
+const char* damaged_text(VaultError error, bool passphrase_ok) {
     switch (error) {
-        case VaultError::Corrupt: return msg::kPayloadDamaged;
         case VaultError::UnsupportedVersion: return msg::kVaultNewer;
-        default: return msg::kVaultUnreadable;
+        case VaultError::BadParams: return msg::kVaultUnsupported;
+        default: return passphrase_ok ? msg::kPayloadDamaged : msg::kVaultUnreadable;
     }
 }
 
@@ -65,17 +65,16 @@ UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStor
         return r;
     }
     if (!guard.begin_attempt()) return r;  // Refused
-    bool key_ok = false;
-    r.error = session.unlock_bytes(file, pass, &key_ok);
+    r.error = session.unlock_bytes(file, pass, &r.passphrase_ok);
     if (r.error == VaultError::Ok) {
         guard.record_success();
         r.kind = UnlockResult::Unlocked;
-    } else if (key_ok) {
-        // The data key unwrapped, so the passphrase was right; the payload is
-        // what is broken (corrupt, or a version this build cannot read).
+    } else if (r.passphrase_ok) {
+        // The data key unwrapped, so the passphrase was right. Out of memory
+        // means "try again"; anything else means the payload is broken.
         guard.record_success();
         session.close();
-        r.kind = UnlockResult::Damaged;
+        r.kind = refundable(r.error) ? UnlockResult::Failed : UnlockResult::Damaged;
     } else if (refundable(r.error)) {
         guard.refund();
         r.kind = UnlockResult::Failed;

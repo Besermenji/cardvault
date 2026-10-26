@@ -53,10 +53,10 @@ VaultError VaultSession::create(BlobStore& store, const SString& pass, const Kdf
     return VaultError::Ok;
 }
 
-VaultError VaultSession::unlock(BlobStore& store, const SString& pass, bool* key_ok) {
+VaultError VaultSession::unlock(BlobStore& store, const SString& pass) {
     std::vector<uint8_t> file;
     if (!store.read(file)) return VaultError::Io;
-    return unlock_bytes(file, pass, key_ok);
+    return unlock_bytes(file, pass);
 }
 
 VaultError VaultSession::unlock_bytes(const std::vector<uint8_t>& file, const SString& pass,

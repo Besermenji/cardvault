@@ -185,24 +185,24 @@ private:
     int first_ = 0;
 };
 
+// Restore guesses count against the guard while a locked vault exists. On a
+// device without a vault (setup screen) there is nothing to protect, and a
+// missing counter would otherwise allow a single guess.
+bool restore_guarded() { return !app().session.is_open() && app().store.exists(); }
+
 void restore_from(const std::string& name) {
     auto image = std::make_shared<std::vector<uint8_t>>();
     if (!sd::read_backup(name, *image)) {
         app().router.push(make_message("Restore", "Could not read the backup file.", color::bad));
         return;
     }
-    Header h;
-    VaultError e = VaultSession::peek_header(*image, h);
-    if (e != VaultError::Ok) {
-        app().router.push(make_message("Restore", vault_error_str(e), color::bad));
-        return;
-    }
+    // restore_check() validates the file (before any attempt is counted).
     // While locked, restore guesses share the unlock screen's delay.
-    if (!app().session.is_open() && attempt_delay_active()) return;
+    if (restore_guarded() && attempt_delay_active()) return;
     InputOpts o = existing_passphrase_opts("Passphrase used when this backup was made");
     app().router.push(make_text_input("Backup passphrase", "", o, [image](SString& pass) {
         App& a = app();
-        bool locked = !a.session.is_open();
+        bool locked = restore_guarded();
         if (locked && attempt_delay_active()) return;
         a.busy("Decrypting backup...");
         RestoreCheck r = restore_check(a.guard, locked, *image, pass);

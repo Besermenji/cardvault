@@ -5,6 +5,7 @@
 #include "core/messages.h"
 #include "crypto/rng.h"
 #include "platform/device.h"
+#include "platform/nvs_kv.h"
 #include "test_hooks.h"
 #include "ui/app.h"
 
@@ -81,6 +82,12 @@ void setup() {
     g_canvas.pushSprite(0, 0);
 
     bool guard_ok = a.guard_kv.begin();
+#ifdef CV_NVS_GUARD_LEGACY
+    if (guard_ok) {
+        NvsKv legacy(CV_NVS_GUARD_LEGACY);
+        if (legacy.begin(true)) a.guard.adopt(legacy);
+    }
+#endif
     bool has_partition = FlashStore::has_partition();
     bool mounted = has_partition && a.store.begin();
     switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),
@@ -115,13 +122,7 @@ void setup() {
             // its contents must go, so no confirmation is asked.
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock: a.router.reset(make_unlock()); break;
-        case BootRoute::Setup:
-            // No vault yet: give the counter a real value, so restoring a
-            // backup from the setup screen does not start from the
-            // "counter missing" penalty.
-            a.guard.reset();
-            a.router.reset(make_setup());
-            break;
+        case BootRoute::Setup: a.router.reset(make_setup()); break;
     }
     a.router.apply();
     a.last_input_ms = millis();

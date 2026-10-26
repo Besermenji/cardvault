@@ -196,7 +196,8 @@ private:
                 a.arm_attempt_delay();
                 return;
             case UnlockResult::Damaged:
-                a.router.push(make_message("Vault damaged", damaged_text(r.error), color::bad));
+                a.router.push(make_message("Vault damaged", damaged_text(r.error, r.passphrase_ok),
+                                           color::bad));
                 return;
             case UnlockResult::Refused:
                 error_ = "Storage error - try again";

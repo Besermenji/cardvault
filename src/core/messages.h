@@ -26,6 +26,9 @@ constexpr const char* kGuardUnavailable =
     "The wrong-passphrase counter cannot be opened, so unlocking is disabled. "
     "Power off and on. If this persists, reflash.";
 constexpr const char* kVaultUnreadable = "The vault file is unreadable. Restore a backup from SD (TAB menu).";
+constexpr const char* kVaultUnsupported =
+    "This vault uses settings this firmware cannot read. Update the firmware; if that does not "
+    "help, restore a backup.";
 constexpr const char* kVaultNewer =
     "This vault was made by a newer CardVault. Update the firmware to open it.";
 constexpr const char* kPayloadDamaged =

@@ -409,7 +409,7 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kStorageSetupTitle) <= 20);
     for (const char* m : {msg::kWipeResume, msg::kWipeCounterStuck, msg::kWipeRetry,
                           msg::kWipeNotArmed, msg::kWipeRemount, msg::kGuardUnavailable,
-                          msg::kVaultUnreadable, msg::kVaultNewer, msg::kPayloadDamaged}) {
+                          msg::kVaultUnreadable, msg::kVaultNewer, msg::kVaultUnsupported, msg::kPayloadDamaged}) {
         TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
                                      msg::kDialogMaxLines,
                                  m);
