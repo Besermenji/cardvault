@@ -812,9 +812,10 @@ def t22_confirm_and_validation(d):
     # spurious dirty flag, made-up clock default.
     st = d.state()
     if st["screen"] == "unlock":
-        d.unlock(P1)
+        d.unlock(P3 if SD_CARD else P1)  # t20 restores a backup made with P3
     go_home(d)
     stored = len(d.dump())
+    memo = f"Memo{int(time.time()) % 100000}"  # unique, so reruns find only this one
 
     # Esc in an edited text input asks; an untouched one closes at once.
     new_entry(d, "Note")
@@ -850,7 +851,7 @@ def t22_confirm_and_validation(d):
     d.type("x")
     d.key("tab")
     d.screen("entry_edit")
-    set_title(d, "Memo")
+    set_title(d, memo)
     save_entry(d)
     d.screen("entry_view")
     d.key("e")
@@ -922,6 +923,27 @@ def t22_confirm_and_validation(d):
     d.key("esc")
     d.screen("confirm", "Discard changes?")
     d.key("y")
+    d.screen("home")
+
+    # A physically held key must not repeat into the next screen: Y on the
+    # delete confirm, held well past the repeat delay, then home's search box.
+    d.type(memo)
+    d.wait(lambda s: info(s)["rows"] == "1", f"search finds {memo}")
+    d.key("enter")
+    d.screen("entry_view")
+    d.key("tab")
+    d.menu_pick("Delete")
+    d.screen("confirm", "Delete secret?")
+    d.cmd("press y 1")
+    try:
+        st = d.screen("home")
+        time.sleep(1.5)  # > 450 ms repeat delay
+    finally:
+        d.cmd("press y 0")
+    st = d.state()
+    check(st["entries"] == stored, f"held Y should have deleted {memo}: {st}")
+    check(info(st)["query"] == memo, f"held Y repeated into the next screen: {st}")
+    d.key("esc")  # clear the search
     d.screen("home")
 
     # Set clock: starts empty when unset, refuses old dates and trailing text,

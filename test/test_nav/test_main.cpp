@@ -9,6 +9,7 @@
 #include "core/flows.h"
 #include "core/messages.h"
 #include "crypto/kdf.h"
+#include "ui/key_stream.h"
 #include "vault/serializer.h"
 
 using namespace cv;
@@ -91,6 +92,81 @@ void test_router_apply_reports_navigation() {
     r.reset(fake("d"));
     TEST_ASSERT_TRUE(r.apply());
     TEST_ASSERT_FALSE(r.apply());
+}
+
+// ---- Key stream ---------------------------------------------------------------
+
+// Every position is the character key `y` + its x (so two positions differ).
+static bool make_char(const KeyPos& p, Key& k) {
+    k = Key();
+    k.ch = char('y' + p.x);
+    return true;
+}
+
+static std::string drain(KeyStream& s) {
+    std::string out;
+    Key k;
+    while (s.next(k)) out += k.ch;
+    return out;
+}
+
+void test_keystream_press_and_repeat() {
+    KeyStream s;
+    std::vector<KeyPos> y = {{0, 0}};
+    s.scan(y, 1000, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay - 1, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan(y, 1000 + KeyStream::kRepeatDelay + KeyStream::kRepeatRate, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.scan({}, 3000, make_char);
+    s.scan({}, 4000, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+}
+
+void test_keystream_enter_never_repeats() {
+    KeyStream s;
+    auto enter = [](const KeyPos&, Key& k) {
+        k = Key();
+        k.code = KeyCode::Enter;
+        return true;
+    };
+    std::vector<KeyPos> held = {{0, 0}};
+    s.scan(held, 0, enter);
+    s.scan(held, 5000, enter);
+    TEST_ASSERT_EQUAL(1, int(s.pending()));
+}
+
+void test_keystream_held_key_stops_after_screen_change() {
+    // Y on a confirm navigates; holding it must not type into the next screen.
+    KeyStream s;
+    std::vector<KeyPos> y = {{0, 0}};
+    s.scan(y, 0, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+    s.drop_pending();  // what the main loop does after navigation
+    for (uint32_t t = 100; t <= 3000; t += 50) s.scan(y, t, make_char);
+    TEST_ASSERT_EQUAL_STRING("", drain(s).c_str());
+    // Released and pressed again: works as usual.
+    s.scan({}, 3100, make_char);
+    s.scan(y, 3200, make_char);
+    TEST_ASSERT_EQUAL_STRING("y", drain(s).c_str());
+}
+
+void test_keystream_drop_discards_queued_roll() {
+    // Two keys land in one scan: the first navigates, the second is dropped.
+    KeyStream s;
+    s.scan({{0, 0}, {1, 0}}, 0, make_char);
+    TEST_ASSERT_EQUAL(2, int(s.pending()));
+    Key k;
+    TEST_ASSERT_TRUE(s.next(k));
+    TEST_ASSERT_EQUAL('y', k.ch);
+    s.drop_pending();
+    TEST_ASSERT_FALSE(s.next(k));
+    // A key pressed while another is held is still seen.
+    s.scan({{0, 0}, {1, 0}, {2, 0}}, 100, make_char);
+    TEST_ASSERT_EQUAL_STRING("{", drain(s).c_str());
 }
 
 void test_router_resumes_new_top_and_orders_ops() {
@@ -929,6 +1005,10 @@ int main() {
     RUN_TEST(test_router_ops_are_deferred_until_apply);
     RUN_TEST(test_router_push_pop_replace_reset);
     RUN_TEST(test_router_apply_reports_navigation);
+    RUN_TEST(test_keystream_press_and_repeat);
+    RUN_TEST(test_keystream_enter_never_repeats);
+    RUN_TEST(test_keystream_held_key_stops_after_screen_change);
+    RUN_TEST(test_keystream_drop_discards_queued_roll);
     RUN_TEST(test_router_resumes_new_top_and_orders_ops);
     RUN_TEST(test_router_screen_can_pop_itself_inside_handler);
     RUN_TEST(test_router_clear_now_destroys_everything_and_drops_pending);
