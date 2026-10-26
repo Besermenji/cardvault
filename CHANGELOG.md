@@ -7,6 +7,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Destructive and sloppy input paths now ask or validate (#38). Esc in a text input you have typed
+  into asks before discarding it (passphrase prompts still close at once). A free-text seed must
+  contain a visible character and the 2FA secret is masked while typing (OPT shows it). Deleting an
+  entry puts it back in memory if the save fails, instead of leaving memory and flash different.
+  The editor counts as changed only when a value really changed, and a generated password you have
+  not saved asks before Esc drops it. Set clock starts empty when no time was set (no invented
+  date), accepts only `YYYY-MM-DD HH:MM[:SS]` with no trailing text, and refuses dates before
+  2025-01-01. A key held while the screen changes no longer repeats into the next screen.
 - Unlocking now really costs ~2 s of Argon2id (#37). Setup used to extrapolate from one cold timing
   and landed near 0.7 s. It now separates the fixed cost from the per-pass cost and checks the
   vault's real key derivation once. Argon2 memory is sized from the free heap, and Change
