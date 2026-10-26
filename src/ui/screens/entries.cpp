@@ -25,10 +25,7 @@ bool icontains(const SString& hay, const SString& needle) {
 bool totp_now(const Entry& e, char* code, int& digits, uint32_t& period) {
     SBytes key;
     if (!base32_decode(e.get_or(kFieldTotpSecret), key) || key.empty()) return false;
-    digits = atoi(e.get_or(kFieldTotpDigits, "6").c_str());
-    if (digits != 6 && digits != 8) digits = 6;
-    period = uint32_t(atoi(e.get_or(kFieldTotpPeriod, "30").c_str()));
-    if (period < 10 || period > 300) period = 30;
+    totp_settings(e, digits, period);
     uint32_t v = totp(key.data(), key.size(), device::unix_time(), period, digits);
     totp_format(v, digits, code);
     return true;
@@ -304,7 +301,7 @@ private:
                                  },
                                  color::bad));
                          },
-                         "", color::bad});
+                         "", color::bad, true});
         app().router.push(make_menu("Secret", std::move(items)));
     }
 
@@ -358,7 +355,7 @@ public:
         } else if (k.down()) {
             sel_ = (sel_ + 1) % rows;
         } else if (k.is(KeyCode::Tab)) {
-            save();
+            sel_ = rows - 1;  // Tab only moves to Save; Enter there saves
         } else if (k.is('g') && sel_ > 0 && sel_ <= nf && fields[sel_ - 1] == kFieldPassword) {
             generate();
         } else if (k.left() || k.right()) {
@@ -408,7 +405,7 @@ public:
             wipe(v);
         }
         scrollbar(c, first_, visible, rows);
-        footer(c, "ENTER edit  TAB save  ` cancel");
+        footer(c, "ENTER edit  TAB to save  ` cancel");
     }
 
 private:
@@ -427,10 +424,7 @@ private:
             return;
         }
         if (f == kFieldWords) {
-            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) {
-                draft_.set(kFieldWords, v);
-                dirty_ = true;
-            });
+            start_mnemonic_flow(draft_.get_or(f), [this](SString& v) { set_field(kFieldWords, v); });
             return;
         }
         InputOpts o;
@@ -438,9 +432,33 @@ private:
         o.mask = f == kFieldPassword || f == kFieldBip39Pass;
         if (f == kFieldTotpSecret) o.hint = "Base32 secret from the QR/setup key";
         app().router.push(make_text_input(field_label(f), draft_.get_or(f), o, [this, f](SString& v) {
+            set_field(f, v);
+        }));
+    }
+
+    // Stores a field value, asking first when it would clear a stored one.
+    // The defining field (password, words, ...) cannot be cleared at all.
+    void set_field(uint8_t f, const SString& v) {
+        const SString* old = draft_.get(f);
+        if (!field_value_empty(f, v) || !old || field_value_empty(f, *old)) {
             draft_.set(f, v);
             dirty_ = true;
-        }));
+            return;
+        }
+        if (f == entry_defining_field(draft_.type)) {
+            char msg[48];
+            snprintf(msg, sizeof msg, "%s can't be empty", field_label(f));
+            app().toast(msg, color::warn, 2500);
+            return;
+        }
+        char title[32];
+        snprintf(title, sizeof title, "Clear %s?", field_label(f));
+        app().router.push(make_confirm(title, "The stored value is removed when you save.",
+                                       [this, f] {
+                                           draft_.set(f, SString());
+                                           dirty_ = true;
+                                       },
+                                       color::warn));
     }
 
     void cycle(uint8_t f, bool fwd) {
@@ -455,14 +473,25 @@ private:
     }
 
     void generate() {
-        app().router.push(make_pwgen([this](SString& v) {
-            draft_.set(kFieldPassword, v);
-            dirty_ = true;
-        }));
+        auto open = [this] {
+            app().router.push(make_pwgen([this](SString& v) {
+                draft_.set(kFieldPassword, v);
+                dirty_ = true;
+            }));
+        };
+        const SString* old = draft_.get(kFieldPassword);
+        if (!old || old->empty()) {
+            open();
+            return;
+        }
+        app().router.push(make_confirm("Replace password?",
+                                       "The generated password replaces the current one when you save.",
+                                       open, color::warn));
     }
 
     void save() {
-        if (const char* err = finalize_entry(draft_)) {
+        const char* warning = nullptr;
+        if (const char* err = finalize_entry(draft_, &warning)) {
             app().toast(err, color::bad);
             return;
         }
@@ -494,7 +523,7 @@ private:
         }
         previous.clear();
         dirty_ = false;
-        app().toast("Saved");
+        app().toast(warning ? warning : "Saved", warning ? color::warn : color::good);
         app().router.pop();
         if (!id_) app().router.push(make_entry_view(id));
     }

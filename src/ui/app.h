@@ -68,6 +68,7 @@ struct MenuItem {
     std::function<void()> action;
     SString detail;  // optional right-aligned text
     uint16_t color = color::text;
+    bool destructive = false;  // digit hotkey only selects it; ENTER runs it
 };
 
 ScreenPtr make_setup();
