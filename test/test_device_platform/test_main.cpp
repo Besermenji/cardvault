@@ -77,10 +77,13 @@ void test_write_read_overwrite_roundtrip() {
     erase_vault_partition();
     FlashStore s;
     TEST_ASSERT_TRUE(s.begin());
-    std::vector<uint8_t> a(50000), b(1234), out;
+    std::vector<uint8_t> a(kMaxFileSize), b(1234), out;
     rng_fill(a.data(), a.size());
     rng_fill(b.data(), b.size());
-    TEST_ASSERT_TRUE(s.write(a));
+    std::vector<uint8_t> too_big(kMaxFileSize + 1, 1);
+    TEST_ASSERT_FALSE(s.write(too_big));  // larger than any legal vault
+    TEST_ASSERT_FALSE(s.exists());
+    TEST_ASSERT_TRUE(s.write(a));  // the largest legal vault
     TEST_ASSERT_TRUE(s.exists());
     TEST_ASSERT_TRUE(s.read(out));
     TEST_ASSERT_TRUE(out == a);
@@ -280,7 +283,9 @@ void test_compact_removes_stale_old_header() {
     bool missing = false;
     TEST_ASSERT_EQUAL(int(CompactResult::Done), int(compact_vault(v, s, {}, missing)));
     TEST_ASSERT_EQUAL(0, count_in_partition(old_salt, kSaltSize));
-    TEST_ASSERT_EQUAL(1, count_in_partition(new_salt, kSaltSize));
+    // The current image may appear more than once (small files live in
+    // LittleFS's metadata log, and tmp-then-rename commits it twice).
+    TEST_ASSERT_TRUE(count_in_partition(new_salt, kSaltSize) >= 1);
     // The vault still opens with the new passphrase only.
     VaultSession again;
     TEST_ASSERT_EQUAL(int(VaultError::Ok), int(again.unlock(s, "second passphrase")));
@@ -359,10 +364,9 @@ void test_kdf_calibration_fits_heap_and_time() {
 }
 
 void test_kdf_work_cap_leaves_headroom() {
-    // Every vault this firmware made has mem <= 256 and passes <= 1000, so its
-    // work is <= 256000 = kMaxKdfWork: existing vaults always stay openable.
-    // Here: today's calibration sits well below the cap, and the worst header
-    // the cap still accepts (at the memory this device uses) stays bounded.
+    // Today's calibration sits well below the cap (existing vaults stay
+    // openable), and the worst header the cap still accepts at the memory this
+    // device uses stays bounded.
     KdfParams p = device::calibrate_kdf(2000);
     uint64_t work = uint64_t(p.mem_kib) * p.passes;
     KdfParams worst{p.mem_kib, kdf_max_passes(p.mem_kib)};
@@ -376,7 +380,7 @@ void test_kdf_work_cap_leaves_headroom() {
              unsigned(worst.passes), unsigned(ms));
     TEST_MESSAGE(msg);
     TEST_ASSERT_TRUE_MESSAGE(work * 2 <= kMaxKdfWork, "calibrated work above half the cap");
-    TEST_ASSERT_TRUE_MESSAGE(ms <= 15000, "worst accepted header blocks over 15 s");
+    TEST_ASSERT_TRUE_MESSAGE(ms <= 12000, "worst accepted header blocks over 12 s");
 }
 
 void test_full_vault_cycle_on_flash() {

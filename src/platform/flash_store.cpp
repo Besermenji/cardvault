@@ -116,7 +116,7 @@ bool FlashStore::exists() { return mounted_ && LittleFS.exists(kFile); }
 bool FlashStore::read(std::vector<uint8_t>& out) { return mounted_ && read_file(kFile, out); }
 
 bool FlashStore::write(const std::vector<uint8_t>& data) {
-    if (!mounted_) return false;
+    if (!mounted_ || data.empty() || data.size() > kMaxFileSize) return false;
     // Verify what landed on flash before replacing the good copy.
     if (!write_verified(kTmp, data)) {
         LittleFS.remove(kTmp);

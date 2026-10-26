@@ -21,7 +21,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Vault files and SD backups are checked (header, size, padding) before any key derivation runs and
   before memory is allocated from their size, so an oversize or malformed file costs no attempt and
   cannot exhaust memory. The Argon2 work a file may request (memory × passes) is capped, so a crafted
-  backup cannot keep the device busy for minutes; every vault made so far is within the cap.
+  backup cannot keep the device busy for more than about 10 s. Calibrated vaults use a small fraction
+  of that (measured ~7000 of 100000 on a Cardputer ADV).
 - Saving never deletes the current vault before the new one is in place, and a half-written new
   version left by a power cut is no longer promoted at boot.
 - New *Compact vault* setting removes old encrypted copies from flash (it first saves a verified safety
