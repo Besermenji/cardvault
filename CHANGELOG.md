@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Unlocking now really costs ~2 s of Argon2id (#37). Setup used to extrapolate from one cold timing
+  and landed near 0.7 s. It now separates the fixed cost from the per-pass cost and checks the
+  vault's real key derivation once. Argon2 memory is sized from the free heap, and Change
+  passphrase re-tunes (never with less memory than before), so older vaults get the full cost too.
 - Reading an SD card no longer freezes the device when the card does not answer (#43): the mount
   is bounded and reports "SD card not readable". The card now uses the same SPI wiring as M5's
   Cardputer example. Backups never overwrite an older file, sort numerically past 9999, and the
@@ -22,7 +26,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   before memory is allocated from their size, so an oversize or malformed file costs no attempt and
   cannot exhaust memory. The Argon2 work a file may request (memory × passes) is capped, so a crafted
   backup cannot keep the device busy for more than about 10 s. Calibrated vaults use a small fraction
-  of that (measured ~7000 of 100000 on a Cardputer ADV).
+  of that (~21000 of 100000 for a 2 s unlock on a Cardputer ADV).
 - Saving never deletes the current vault before the new one is in place, and a half-written new
   version left by a power cut is no longer promoted at boot.
 - New *Compact vault* setting removes old encrypted copies from flash (it first saves a verified safety
