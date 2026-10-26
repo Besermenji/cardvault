@@ -70,6 +70,39 @@ void test_kdf_deterministic_and_salted() {
     TEST_ASSERT_TRUE(memcmp(a, d, 32) != 0);
 }
 
+// RFC 9106 section 5.3 (Argon2id): the vendored Monocypher against the spec,
+// including lanes, secret and associated data, which our wrapper never uses.
+void test_argon2id_rfc9106_vector() {
+    uint8_t pass[32], salt[16], key[8], ad[12], tag[32];
+    memset(pass, 0x01, sizeof pass);
+    memset(salt, 0x02, sizeof salt);
+    memset(key, 0x03, sizeof key);
+    memset(ad, 0x04, sizeof ad);
+    static uint8_t work[32 * 1024];
+    crypto_argon2_config cfg = {CRYPTO_ARGON2_ID, 32, 3, 4};
+    crypto_argon2_inputs in = {pass, salt, sizeof pass, sizeof salt};
+    crypto_argon2_extras ex = {key, ad, sizeof key, sizeof ad};
+    crypto_argon2(tag, sizeof tag, work, cfg, in, ex);
+    TEST_ASSERT_EQUAL_STRING("0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659",
+                             to_hex(tag, sizeof tag).c_str());
+}
+
+// Through our wrapper (1 lane, no secret/AD, 16-byte salt, 32-byte output).
+// Reference value from the argon2-cffi package (libargon2), not from this code:
+//   hash_secret_raw(b"correct horse battery", bytes(range(1, 17)), time_cost=3,
+//                   memory_cost=64, parallelism=1, hash_len=32, type=Type.ID,
+//                   version=19)
+void test_kdf_derive_known_answer() {
+    uint8_t salt[16];
+    for (int i = 0; i < 16; i++) salt[i] = uint8_t(i + 1);
+    uint8_t out[32];
+    const char* pw = "correct horse battery";
+    TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>(pw), strlen(pw), salt,
+                                KdfParams{64, 3}));
+    TEST_ASSERT_EQUAL_STRING("9342d618db7d56d10b88a161b58228bf82879fa6ebfcd45286937ac5dcd4b124",
+                             to_hex(out, sizeof out).c_str());
+}
+
 void test_kdf_rejects_bad_params() {
     uint8_t out[32], salt[16] = {};
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{8, 3}));
@@ -324,6 +357,8 @@ int main() {
     RUN_TEST(test_hmac_sha1_rfc2202);
     RUN_TEST(test_kdf_deterministic_and_salted);
     RUN_TEST(test_kdf_rejects_bad_params);
+    RUN_TEST(test_argon2id_rfc9106_vector);
+    RUN_TEST(test_kdf_derive_known_answer);
     RUN_TEST(test_kdf_field_cap_edges);
     RUN_TEST(test_kdf_work_cap_edges);
     RUN_TEST(test_tune_hits_target_and_estimates_overhead);
