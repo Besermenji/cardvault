@@ -12,6 +12,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
 
 ### Security
+- A failed erase no longer resets the wrong-passphrase counter. Every wipe (10 wrong passphrases or
+  "Erase vault") first saves the counter as exhausted and resets it only after the erase succeeds;
+  a failed or interrupted wipe stops on an error screen and is retried on the next boot, even when
+  the storage no longer mounts.
 - The 8-128 character passphrase policy is now enforced in the vault core (create, change passphrase,
   backup), not only in the UI; an empty passphrase is never accepted for unlock or restore. Vaults and
   backups made earlier with a shorter passphrase still open.

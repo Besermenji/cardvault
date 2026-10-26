@@ -9,11 +9,13 @@ BootRoute boot_route(bool has_partition, bool mounted, bool guard_exhausted, boo
     return vault_exists ? BootRoute::Unlock : BootRoute::Setup;
 }
 
-bool wipe_vault(BlobStore& store, AttemptGuard& guard) {
+WipeResult wipe_vault(BlobStore& store, AttemptGuard& guard) {
+    WipeResult r;
     guard.mark_exhausted();  // best effort: the erase must run even if NVS fails
-    if (!store.erase()) return false;
-    guard.reset();
-    return true;
+    r.armed = guard.exhausted();
+    r.erased = store.erase();
+    if (r.erased) r.reset = guard.reset();
+    return r;
 }
 
 UnlockResult unlock_attempt(AttemptGuard& guard, VaultSession& session, BlobStore& store,

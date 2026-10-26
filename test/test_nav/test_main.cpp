@@ -134,16 +134,25 @@ void test_router_clear_now_destroys_everything_and_drops_pending() {
 // ---- Wipe -------------------------------------------------------------------
 
 namespace {
+// Accepts `writes_left` more writes, then fails every write (-1 = never fails).
+struct FlakyKv : MemoryKv {
+    int writes_left = -1;
+    bool set_u32(const char* key, uint32_t value) override {
+        if (writes_left == 0) return false;
+        if (writes_left > 0) writes_left--;
+        return MemoryKv::set_u32(key, value);
+    }
+};
+
+// Records the guard's state at the moment the vault is erased.
 struct SpyStore : MemoryStore {
     bool fail_erase = false;
-    MemoryKv* kv = nullptr;
-    uint32_t failures_at_erase = 0;
+    AttemptGuard* guard = nullptr;
+    bool exhausted_at_erase = false;
     bool erase_called = false;
     bool erase() override {
         erase_called = true;
-        uint32_t v = 0;
-        if (kv) kv->get_u32("fails", v);
-        failures_at_erase = v;
+        if (guard) exhausted_at_erase = guard->exhausted();
         if (fail_erase) return false;
         return MemoryStore::erase();
     }
@@ -154,28 +163,45 @@ void test_wipe_success_clears_vault_and_counter() {
     MemoryKv kv;
     AttemptGuard g(kv);
     SpyStore s;
-    s.kv = &kv;
+    s.guard = &g;
     s.write({1, 2, 3});
     g.begin_attempt();
-    TEST_ASSERT_TRUE(wipe_vault(s, g));
+    WipeResult r = wipe_vault(s, g);
+    TEST_ASSERT_TRUE(r.armed && r.erased && r.reset);
     TEST_ASSERT_FALSE(s.exists());
     TEST_ASSERT_EQUAL(0, g.failures());
     // The intent to wipe was persisted before anything was destroyed.
-    TEST_ASSERT_EQUAL(kMaxAttempts, s.failures_at_erase);
+    TEST_ASSERT_TRUE(s.exhausted_at_erase);
 }
 
 void test_wipe_failure_keeps_counter_exhausted() {
     MemoryKv kv;
     AttemptGuard g(kv);
     SpyStore s;
-    s.kv = &kv;
     s.fail_erase = true;
     s.write({1, 2, 3});
-    TEST_ASSERT_FALSE(wipe_vault(s, g));
+    WipeResult r = wipe_vault(s, g);
+    TEST_ASSERT_TRUE(r.armed);
+    TEST_ASSERT_FALSE(r.erased);
+    TEST_ASSERT_FALSE(r.reset);
     TEST_ASSERT_TRUE(s.exists());
     TEST_ASSERT_TRUE(g.exhausted());
     // The next boot retries the wipe, even if the partition is unmountable.
     TEST_ASSERT_EQUAL(int(BootRoute::Wipe), int(boot_route(true, false, g.exhausted(), true)));
+}
+
+void test_wipe_reports_counter_that_could_not_be_reset() {
+    FlakyKv kv;
+    kv.writes_left = 1;  // mark_exhausted succeeds, reset fails
+    AttemptGuard g(kv);
+    SpyStore s;
+    s.write({1, 2, 3});
+    WipeResult r = wipe_vault(s, g);
+    TEST_ASSERT_TRUE(r.armed);
+    TEST_ASSERT_TRUE(r.erased);
+    TEST_ASSERT_FALSE(r.reset);  // caller must stop, not reboot into another wipe
+    TEST_ASSERT_FALSE(s.exists());
+    TEST_ASSERT_TRUE(g.exhausted());
 }
 
 void test_wipe_runs_even_if_counter_cannot_persist() {
@@ -184,9 +210,38 @@ void test_wipe_runs_even_if_counter_cannot_persist() {
     AttemptGuard g(kv);
     SpyStore s;
     s.write({1, 2, 3});
-    TEST_ASSERT_TRUE(wipe_vault(s, g));
+    WipeResult r = wipe_vault(s, g);
     TEST_ASSERT_TRUE(s.erase_called);
+    TEST_ASSERT_TRUE(r.erased);
+    TEST_ASSERT_FALSE(r.armed);
     TEST_ASSERT_FALSE(s.exists());
+}
+
+void test_wipe_not_armed_when_erase_and_counter_both_fail() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    kv.fail_writes = true;
+    SpyStore s;
+    s.fail_erase = true;
+    s.write({1, 2, 3});
+    WipeResult r = wipe_vault(s, g);
+    // No retry is scheduled: the UI must not promise one.
+    TEST_ASSERT_FALSE(r.armed);
+    TEST_ASSERT_FALSE(r.erased);
+    TEST_ASSERT_TRUE(s.exists());
+}
+
+void test_wipe_armed_by_earlier_failures_even_if_mark_fails() {
+    MemoryKv kv;
+    AttemptGuard g(kv);
+    for (uint32_t i = 0; i < kMaxAttempts; i++) g.begin_attempt();
+    kv.fail_writes = true;
+    SpyStore s;
+    s.fail_erase = true;
+    s.write({1, 2, 3});
+    WipeResult r = wipe_vault(s, g);
+    TEST_ASSERT_TRUE(r.armed);  // ten wrong passphrases already exhausted it
+    TEST_ASSERT_FALSE(r.erased);
 }
 
 // ---- Boot route -------------------------------------------------------------
@@ -449,6 +504,18 @@ void test_restore_commit_io_error_keeps_counter() {
     TEST_ASSERT_FALSE(f.session.is_open());
 }
 
+void test_unlock_leaves_counter_when_reset_fails() {
+    Fixture f;
+    FlakyKv kv;
+    kv.writes_left = 1;  // begin_attempt persists, record_success fails
+    AttemptGuard g(kv);
+    TEST_ASSERT_EQUAL(int(UnlockResult::Unlocked),
+                      int(unlock_attempt(g, f.session, f.store, "right horse battery").kind));
+    // Fails closed: the attempt stays counted, and the UI warns about it.
+    TEST_ASSERT_EQUAL(1, g.failures());
+    f.session.close();
+}
+
 // ---- Locking ----------------------------------------------------------------
 
 void test_lock_destroys_all_screens_and_wipes_session() {
@@ -498,7 +565,10 @@ int main() {
     RUN_TEST(test_boot_route);
     RUN_TEST(test_wipe_success_clears_vault_and_counter);
     RUN_TEST(test_wipe_failure_keeps_counter_exhausted);
+    RUN_TEST(test_wipe_reports_counter_that_could_not_be_reset);
     RUN_TEST(test_wipe_runs_even_if_counter_cannot_persist);
+    RUN_TEST(test_wipe_not_armed_when_erase_and_counter_both_fail);
+    RUN_TEST(test_wipe_armed_by_earlier_failures_even_if_mark_fails);
     RUN_TEST(test_unlock_success_resets_counter);
     RUN_TEST(test_unlock_wrong_counts_and_reports_delay);
     RUN_TEST(test_unlock_counter_persisted_before_check);
@@ -517,6 +587,7 @@ int main() {
     RUN_TEST(test_restore_corrupt_image_refunds);
     RUN_TEST(test_restore_commit_replaces_vault_and_resets_counter);
     RUN_TEST(test_restore_commit_io_error_keeps_counter);
+    RUN_TEST(test_unlock_leaves_counter_when_reset_fails);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
     RUN_TEST(test_autolock_step);
     return UNITY_END();

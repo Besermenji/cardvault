@@ -2,6 +2,7 @@
 #include <M5Cardputer.h>
 
 #include "core/flows.h"
+#include "core/messages.h"
 #include "ui/app.h"
 
 namespace cv {
@@ -20,6 +21,12 @@ void draw_lock_icon(Canvas& c, int cx, int cy, uint16_t col) {
 
 void create_vault(SString& pass) {
     App& a = app();
+    // Clear any stale count first, so a new vault never starts with failures.
+    if (!a.guard.reset()) {
+        a.router.push(make_message("Setup failed", "Could not reset the attempt counter.",
+                                   color::bad));
+        return;
+    }
     a.busy("Tuning security...");
     KdfParams kdf = device::calibrate_kdf(2000);
     a.busy("Creating vault...");
@@ -28,7 +35,6 @@ void create_vault(SString& pass) {
         a.router.push(make_message("Setup failed", vault_error_str(e), color::bad));
         return;
     }
-    a.guard.reset();
     a.router.reset(make_home());
     a.toast("Vault created. TAB opens the menu.", color::good, 3000);
 }
@@ -181,6 +187,7 @@ private:
         switch (r.kind) {
             case UnlockResult::Unlocked:
                 a.router.reset(make_home());
+                if (a.guard.failures() > 0) a.toast(msg::kCounterNotReset, color::warn, 3000);
                 return;
             case UnlockResult::MustWipe:
                 a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");

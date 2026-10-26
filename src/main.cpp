@@ -103,9 +103,12 @@ void setup() {
                                         color::warn));
             break;
         case BootRoute::Wipe:
-            // A wipe was started (too many wrong passphrases, or an erase on
-            // request) but did not finish, e.g. power was cut.
-            a.wipe_and_reboot("Finishing an interrupted erase.");
+            // The counter reached the limit (possibly with power cut during the
+            // last check, which counts as a failure) or a wipe was started but
+            // did not finish. This runs even when the partition does not mount:
+            // it is our own "vault" partition, and an exhausted counter means
+            // its contents must go, so no confirmation is asked.
+            a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock: a.router.reset(make_unlock()); break;
         case BootRoute::Setup: a.router.reset(make_setup()); break;
     }
