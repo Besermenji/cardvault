@@ -15,7 +15,9 @@ Publishing needs the maintainer's M5Stack community account, so it is done by ha
    - Name: `CardVault`
    - Version: `X.Y.Z`
    - Device: **Cardputer**
-   - Description: short feature summary + "Wi-Fi/BT never used. Source: GitHub link".
+   - Description: short feature summary + "Wi-Fi/BT never used. Source: GitHub link" + the support
+     line (Launcher shows the same text):
+     `Support: BTC bc1qwa2d9rg06dz97rdcjg00cy3j9myevawq9075fy / ETH 0xa263474B98a69478aaeb7ac5562f1647D3c24712`
    - GitHub: `https://github.com/Besermenji/cardvault`
    - Firmware: `cardvault-vX.Y.Z-cardputer-adv.bin` (merged image, flashed at `0x0`)
    - Cover: a 240×135 screenshot of the home screen.

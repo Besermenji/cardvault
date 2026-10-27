@@ -41,6 +41,8 @@ jobs:
           v="${v%%-*}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
+          . docs/support/addresses.env
+          printf '\n### Support\n\n- BTC `%s`\n- ETH `%s`\n' "$BTC" "$ETH" >> notes.md
 
       - name: Publish GitHub release
         env:
@@ -55,6 +57,7 @@ jobs:
         run: |
           mkdir -p site
           cp -r docs/flasher/* site/
+          cp docs/support/*.svg site/
           cp release/cardvault-*-cardputer-adv.bin site/cardvault.bin
           sed -i "s/__VERSION__/${GITHUB_REF_NAME#v}/" site/manifest.json site/index.html
 

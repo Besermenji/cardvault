@@ -23,6 +23,12 @@
     code { background: var(--bg); padding: 1px 6px; border-radius: 4px; }
     esp-web-install-button { display: block; margin-top: 16px; }
     a { color: var(--accent); }
+    .support-sub { margin: 8px 0 16px; font-size: 14px; }
+    .qr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    figure { margin: 0; text-align: center; }
+    figure img { width: 160px; height: 160px; border-radius: 8px; }
+    figcaption { margin-top: 8px; font-size: 14px; }
+    figcaption code { display: inline-block; margin-top: 4px; word-break: break-all; user-select: all; }
   </style>
 </head>
 <body>
@@ -44,6 +50,23 @@
       If you already use CardVault, make an SD backup first — erasing the flash erases the vault.
       Verify the image checksum against the
       <a href="https://github.com/Besermenji/cardvault/releases">GitHub release</a>.
+    </div>
+
+    <div class="card">
+      <b>Support CardVault</b>
+      <p class="sub support-sub">CardVault is free and MIT licensed. Donations pay for hardware and development time.</p>
+      <div class="qr-grid">
+        <figure>
+          <img src="btc.svg" alt="Bitcoin QR code">
+          <figcaption>Bitcoin<br><code>bc1qwa2d9rg06dz97rdcjg00cy3j9myevawq9075fy</code></figcaption>
+        </figure>
+        <figure>
+          <img src="eth.svg" alt="Ethereum QR code">
+          <figcaption>Ethereum<br><code>0xa263474B98a69478aaeb7ac5562f1647D3c24712</code></figcaption>
+        </figure>
+      </div>
+      <p class="sub support-sub">These are the only donation addresses; they match the
+        <a href="https://github.com/Besermenji/cardvault#support">README</a>.</p>
     </div>
   </main>
 </body>

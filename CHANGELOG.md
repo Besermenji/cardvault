@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Support section with BTC/ETH donation addresses and QR codes in the README, the web flasher,
+  release notes and the M5Burner description, plus a GitHub Sponsor button (#54). The addresses live
+  in `docs/support/addresses.env`; `tools/support.py` (run in CI) checks their checksums, the QR codes
+  and every copy.
+
 ### Fixed
 - Secret hygiene (#39). A revealed secret hides again after 20 s, when the screen dims and when you
   come back to the entry; ENTER on a secret row reveals just that row and does nothing on

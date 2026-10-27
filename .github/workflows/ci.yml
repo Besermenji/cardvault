@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Donation addresses and QR codes match everywhere
+        run: |
+          pip install segno==1.6.6 zxing-cpp==3.1.1 numpy==2.5.4
+          python3 tools/support.py
+
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
