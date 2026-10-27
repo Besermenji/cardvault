@@ -36,6 +36,14 @@ pio test -e native              # run host unit tests
 `python3 tools/screenshots.py <port> --yes` (see the README), then commit the changed PNGs. The `shot` command
 it uses lives in `src/test_hooks.cpp`, so it only exists in the e2e build.
 
+## UI changes
+
+[DESIGN.md](DESIGN.md) describes the on-device look (colours, fonts, grid, components, do's and don'ts). Change it in the
+same commit as `src/ui/theme.h` or `src/ui/layout.h`, then run `tools/lint_design.sh` (needs Node 18+; the design.md CLI
+is pinned in `tools/design-lint/package-lock.json`). CI fails when the colours, font names, screen geometry or glyph cells
+in DESIGN.md differ from the headers; component sizes, radii and row heights are kept by hand.
+A new colour goes into `theme.h` first; do not draw with a raw RGB value.
+
 ## Rules for security-sensitive code
 
 - Release builds (`cardputer`) never write secrets, passphrases, keys or decrypted content anywhere.

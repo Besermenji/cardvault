@@ -174,7 +174,7 @@ partition has a different label) with its own settings, so it cannot open a real
 empty demo vault. CI checks that release images don't contain it.
 
 Layout: `src/crypto`, `src/vault`, `src/features`, `src/security` are Arduino-free and unit tested;
-`src/platform` talks to the hardware; `src/ui` holds the screens. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`src/platform` talks to the hardware; `src/ui` holds the screens, styled as described in [DESIGN.md](DESIGN.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Support
 
