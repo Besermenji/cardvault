@@ -100,6 +100,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Vault entries are deserialized in place so short secrets are not left in stack temporaries.
 
 ### Documentation
+- `DESIGN.md` describes the on-device UI (colours, fonts, the 240x135 grid, components, rules for new
+  screens) in the design.md format (#66). `tools/lint_design.sh` lints it with a pinned CLI and checks the
+  colours and geometry against `src/ui/theme.h` and `layout.h`; CI runs it.
 - The security docs now say what is and is not protected (#41). SD backups can be guessed offline
   with no attempt limit (README no longer suggests reusing the vault passphrase for them); the Argon2
   cost is ~2 s on the device only (about 120 guesses/s on one Apple M1 core) and only lightly
