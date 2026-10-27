@@ -45,13 +45,11 @@ jobs:
           echo "firmware.bin: $size bytes (budget $budget)"
           test "$size" -le "$budget"
 
-      - name: Release build must not contain debug or test code
-        run: |
-          for marker in CVSHOT "CVTEST READY" cvt_guard "unknown command" "bad request" magic_hits; do
-            if LC_ALL=C grep -a -q "$marker" .pio/build/cardputer/firmware.bin; then
-              echo "release firmware contains test/debug marker: $marker"; exit 1
-            fi
-          done
+      - name: Release environment is a plain build
+        run: python3 tools/check_release_flags.py
+
+      - name: Merge image (checked: vault at 0x310000, no test or debug code)
+        run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
       - name: Debug, e2e and on-device test builds compile
         run: |
@@ -59,8 +57,24 @@ jobs:
           pio run -e cardputer-e2e
           pio test -e cardputer-test --without-uploading --without-testing
 
-      - name: Merge image
-        run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
+      # Positive controls: the release check must reject images that really do
+      # contain what it looks for, otherwise a passing check proves nothing.
+      - name: Release image check rejects debug and e2e images
+        run: |
+          expect_fail() {  # <env> <reason>...
+            env_name=$1; shift
+            tools/merge_bin.sh control control-out "$env_name"
+            img="control-out/cardvault-vcontrol-${env_name}-NOT-FOR-RELEASE.bin"
+            if tools/check_release_image.sh "$img" 2> control.err; then
+              echo "check accepted the $env_name image"; exit 1
+            fi
+            for reason in "$@"; do
+              grep -qF "$reason" control.err || {
+                echo "check did not report '$reason' for $env_name:"; cat control.err; exit 1; }
+            done
+          }
+          expect_fail cardputer-debug "vault partition at 0x410000" "marker: CVSHOT"
+          expect_fail cardputer-e2e "vault partition at 0x410000" "marker: CVTEST" "marker: unknown command"
 
       - uses: actions/upload-artifact@v4
         with:
