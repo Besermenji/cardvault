@@ -32,7 +32,13 @@ pio test -e native              # run host unit tests
 
 ## Rules for security-sensitive code
 
-- Never log secrets, passphrases, keys or decrypted content (not even in debug builds).
+- Release builds (`cardputer`) never write secrets, passphrases, keys or decrypted content anywhere.
+  Do not add logging of them.
+- The test builds do, on purpose: `cardputer-e2e` has a `dump` command that prints every entry over
+  serial, and `cardputer-debug` streams the screen (including anything revealed). That is why they
+  run on the `cvtvault` partition and their own NVS namespaces, and must never be used with real
+  secrets. Code that exposes secret data must stay behind `CV_TEST_HOOKS` / `CV_SCREENSHOT`, and
+  CI checks that release images contain none of it.
 - Wipe secret buffers with `crypto_wipe` as soon as they are no longer needed.
 - Code in `src/crypto`, `src/vault` and `src/features` must stay Arduino-free so it can be unit tested on the host.
 - Changes to the on-disk format must bump the format version and keep reading old versions.

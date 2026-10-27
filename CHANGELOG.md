@@ -43,8 +43,11 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
-  gone, so CardVault can run safely next to other firmware installed with Launcher.
-- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
+  gone, so CardVault no longer shares storage with other firmware installed with Launcher. Other
+  firmware can still read the encrypted vault and reset the attempt counter.
+- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware. The attempt
+  counter is carried over on upgrade from v0.1.0-rc1, but the settings (auto-lock, brightness) go back to
+  their defaults once.
 
 ### Security
 - Release and CI hardening (#40). The release check (`tools/check_release_image.sh`) runs on the
@@ -93,6 +96,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   the vault, allowing unlimited guesses. The counter now resets only after a restore completes.
 - Vault entries are deserialized in place so short secrets are not left in stack temporaries.
 
+### Documentation
+- The security docs now say what is and is not protected (#41). SD backups can be guessed offline
+  with no attempt limit (README no longer suggests reusing the vault passphrase for them); the Argon2
+  cost is ~2 s on the device only (about 120 guesses/s on one Apple M1 core) and only lightly
+  memory-hard; a wipe covers the vault partition only; anyone holding the device can trigger the
+  10-failure wipe; rollback to an older valid vault or backup is not detected; wiping RAM is best
+  effort; the radios are linked but never turned on; Launcher behaviour is Launcher's and is not yet
+  verified on hardware; the e2e and debug builds do print secrets (that is what the `cvtvault`
+  partition is for). The security review notes were brought up to date.
+
 ### Tests
 - Regression coverage for the audit findings (#42). Host: the vendored Argon2id is checked against
   the RFC 9106 vector and our wrapper against libargon2; freed `SString`/`SBytes`/`SVec` buffers
@@ -105,7 +118,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
   ten wrong passphrases, ERASE) prove the flash was emptied; new scenarios for TAB on every screen,
   an empty backup passphrase, confirmed clearing of a stored field and the Set clock default.
 
-## [0.1.0] - 2026-10-20
+## [0.1.0-rc1] - 2026-10-20
 
 ### Added
 - Encrypted vault: Argon2id + XChaCha20-Poly1305 (Monocypher 4.0.2), authenticated header, padding.

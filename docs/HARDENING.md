@@ -10,7 +10,10 @@
 Stock CardVault encrypts the vault with your passphrase (Argon2id + XChaCha20-Poly1305) and erases it
 after 10 wrong attempts **on the device**. Anyone holding the Cardputer can still put it in USB
 download mode, read the flash with `esptool.py read_flash` and guess passphrases on a computer,
-where the attempt limit doesn't apply. Today only a strong passphrase stops that.
+where the attempt limit doesn't apply. Today only a strong passphrase stops that. The device's Argon2id setting (128 KiB, about 160 passes for
+~2 s) is cheap for a computer: one Apple M1 core running the same code does about 120 guesses per second
+(measured 2026-10-27), and a GPU or optimised code runs many times that, so do not count on the KDF to slow
+an attacker down much.
 
 The goal of hardening: **the encrypted vault can't be copied off the device**, so every guess has to go
 through the on-device attempt guard.
