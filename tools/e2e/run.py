@@ -239,11 +239,17 @@ class Device:
         self.key("down", items.index(label))
         self.key("enter")
 
-    def unlock(self, pw):
-        st = self.screen("unlock")
-        if st["dimmed"]:  # idle: the first key only wakes the screen
+    def wake(self):
+        """A dimmed screen swallows the first key: press one to wake it."""
+        st = self.state()
+        if st["dimmed"]:
             self.key("esc")
-            self.wait(lambda s: not s["dimmed"], "screen awake")
+            st = self.wait(lambda s: not s["dimmed"], "screen awake")
+        return st
+
+    def unlock(self, pw):
+        self.screen("unlock")
+        self.wake()
         self.type(pw)
         self.key("enter")
         return self.screen("home", timeout=30)
@@ -365,19 +371,29 @@ def find_one(d, title):
     return found[0]
 
 
-def delete_entry(d, title):
+def open_entry(d, title):
+    """Home -> search for `title` -> its entry_view."""
     go_home(d)
     d.type(title)
     d.wait(lambda s: info(s)["rows"] == "1", f"search finds {title}")
     d.key("enter")
-    d.screen("entry_view")
+    return d.screen("entry_view")
+
+
+def clear_search(d):
+    """On home with a search query: Esc clears it (it does not lock)."""
+    d.screen("home")
+    d.key("esc")
+    return d.wait(lambda s: s["screen"] == "home" and info(s)["query"] == "", "search cleared")
+
+
+def delete_entry(d, title):
+    open_entry(d, title)
     d.key("tab")
     d.menu_pick("Delete")
     d.screen("confirm", "Delete secret?")
     d.key("y")
-    d.screen("home")
-    d.key("esc")  # clear the search
-    d.screen("home")
+    clear_search(d)
 
 
 def set_title(d, title):
@@ -1576,14 +1592,17 @@ def t26_serial_output_is_silent(d):
 
 
 def t27_screenshot_hook(d):
-    """The `shot` command (tools/screenshots.py) returns the whole screen."""
-    go_home(d) if d.state()["screen"] != "unlock" else d.unlock(P3 if SD_CARD else P1)
+    """The `shot` command (tools/screenshots.py) returns the whole screen,
+    whichever it is, and leaves it as it was."""
+    before = d.state()
     w, h, rows = d.shot()
     check((w, h) == (240, 135), f"unexpected size {w}x{h}")
     colours = {row[i:i + 4] for row in rows for i in range(0, len(row), 4)}
     check(len(colours) >= 4, f"screen looks blank: {len(colours)} colours")
     check(len(set(rows[:18])) > 1, "header band is empty")
-    d.screen("home")
+    after = d.state()
+    check((after["screen"], after["title"], after["depth"]) ==
+          (before["screen"], before["title"], before["depth"]), f"shot changed the screen: {after}")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]

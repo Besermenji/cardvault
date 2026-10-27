@@ -31,5 +31,11 @@ void mask(Canvas& c, int x, int y, size_t len, int max_cols);
 void text_small(Canvas& c, int x, int y, const char* s, uint16_t col = color::dim);
 void text_mono(Canvas& c, int x, int y, const char* s, uint16_t col = color::text);
 
+#if defined(CV_SCREENSHOT) || defined(CV_TEST_HOOKS)
+// Screenshots (debug and e2e builds only): row y of the canvas as RGB565, 4 hex
+// digits per pixel. `out` holds c.width() * 4 + 1 characters.
+void row_hex(Canvas& c, int y, char* out);
+#endif
+
 }  // namespace ui
 }  // namespace cv

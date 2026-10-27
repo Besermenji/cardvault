@@ -2,7 +2,7 @@
 """Take the README and M5Burner screenshots from a Cardputer running the e2e build.
 
   pio run -e cardputer-e2e -t upload
-  python3 tools/screenshots.py /dev/cu.usbmodem1101 --yes [out_dir]      # default: docs/screenshots
+  tools/screenshots.py /dev/cu.usbmodem1101 --yes [out_dir]      # default: docs/screenshots
 
 This ERASES the e2e test vault (the "cvtvault" partition, never a real vault), creates a new one with
 made-up entries (public test vectors only), drives the real UI to each main screen and saves a PNG of
@@ -11,6 +11,7 @@ re-runs differ only in the battery icon and the generated password on the genera
 
 Needs pyserial (PlatformIO's Python has it) and no SD card.
 """
+import argparse
 import calendar
 import pathlib
 import sys
@@ -30,13 +31,16 @@ CLOCK += (10 - CLOCK % 30) % 30
 SCALE = 2  # README images; the cover is 1:1
 
 
-def capture(d, out, name, scale=SCALE):
-    d.wait(lambda s: not s["toast"] and not s["dimmed"], "no toast on screen")
+def capture(d, out, name, cover=False):
+    """Save the screen as <name>.png (enlarged for the README) and, with
+    `cover`, also as cover.png at 1:1 (M5Burner)."""
+    d.wake()
+    d.wait(lambda s: not s["toast"], "no toast on screen")
     d.cmd(f"settime {CLOCK}")
     w, h, rows = d.shot()
-    path = out / f"{name}.png"
-    screenshot.write_png(path, w, h, rows, scale)
-    print(f"saved {path} ({w * scale}x{h * scale})", flush=True)
+    for path, scale in [(out / f"{name}.png", SCALE)] + ([(out / "cover.png", 1)] if cover else []):
+        screenshot.write_png(path, w, h, rows, scale)
+        print(f"saved {path} ({w * scale}x{h * scale})", flush=True)
 
 
 def open_menu_item(d, label, screen):
@@ -46,31 +50,23 @@ def open_menu_item(d, label, screen):
     return d.screen(screen)
 
 
-def open_entry(d, title):
-    """Home -> search for `title` -> its entry_view."""
-    run.go_home(d)
-    d.type(title)
-    d.wait(lambda s: run.info(s)["rows"] == "1", f"search finds {title}")
-    d.key("enter")
-    d.screen("entry_view")
-
-
 def leave_entry(d):
+    """entry_view opened with run.open_entry -> home without the search."""
     d.key("esc")
-    d.screen("home")
-    d.key("esc")  # clear the search
-    d.screen("home")
+    run.clear_search(d)
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--yes"]
-    if "--yes" not in sys.argv[1:] or not 1 <= len(args) <= 2:
-        sys.exit(__doc__)
-    port = args[0]
-    out = pathlib.Path(args[1]) if len(args) > 1 else HERE.parent / "docs" / "screenshots"
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("port")
+    ap.add_argument("out_dir", nargs="?", type=pathlib.Path, default=HERE.parent / "docs" / "screenshots")
+    ap.add_argument("--yes", action="store_true", required=True,
+                    help="confirm: the e2e test vault on the device is erased")
+    args = ap.parse_intermixed_args()  # out_dir may follow --yes
+    out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
 
-    d = run.Device(port)
+    d = run.Device(args.port)
     d.restart_cmd("factory")
     d.screen("setup")
 
@@ -89,14 +85,13 @@ def main():
     d.unlock(run.P1)
 
     run.go_home(d)
-    capture(d, out, "home")
-    capture(d, out, "cover", scale=1)
+    capture(d, out, "home", cover=True)
 
-    open_entry(d, "Email")
+    run.open_entry(d, "Email")
     capture(d, out, "entry")
     leave_entry(d)
 
-    open_entry(d, "Cold wallet")
+    run.open_entry(d, "Cold wallet")
     d.key("enter")  # Words
     d.screen("seed_view")
     capture(d, out, "seed")

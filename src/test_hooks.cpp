@@ -7,6 +7,7 @@
 #include <string>
 
 #include "core/flows.h"
+#include "ui/gfx.h"
 
 namespace cv {
 namespace test {
@@ -39,10 +40,14 @@ std::string esc(const std::string& s) {
     return o;
 }
 
-void reply(const std::string& s) {
+// Starts the reply line; the payload and the newline follow.
+void reply_begin() {
     Serial.print("OK ");
     Serial.print(g_id.c_str());
     Serial.print(' ');
+}
+void reply(const std::string& s) {
+    reply_begin();
     Serial.println(s.c_str());
 }
 void error(const char* s) {
@@ -136,13 +141,12 @@ void shot(ui::App& a) {
     if (!s || !a.canvas) return error("no screen");
     s->draw(*a.canvas);
     a.draw_toast(*a.canvas);
-    Serial.print("OK ");
-    Serial.print(g_id.c_str());
-    Serial.printf(" %d %d ", ui::kW, ui::kH);
+    // Streamed: the whole line is ~130 KB, too big to build in RAM.
+    reply_begin();
+    Serial.printf("%d %d ", ui::kW, ui::kH);
     char hex[ui::kW * 4 + 1];
     for (int y = 0; y < ui::kH; y++) {
-        for (int x = 0; x < ui::kW; x++)
-            snprintf(hex + x * 4, 5, "%04x", unsigned(a.canvas->readPixel(x, y)));
+        ui::row_hex(*a.canvas, y, hex);
         Serial.print(hex);
     }
     Serial.println();

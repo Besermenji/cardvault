@@ -1,5 +1,6 @@
 #include "ui/gfx.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "platform/device.h"
@@ -146,6 +147,12 @@ void text_mono(Canvas& c, int x, int y, const char* s, uint16_t col) {
     c.setTextColor(col);
     c.drawString(s, x, y);
 }
+
+#if defined(CV_SCREENSHOT) || defined(CV_TEST_HOOKS)
+void row_hex(Canvas& c, int y, char* out) {
+    for (int x = 0; x < c.width(); x++) snprintf(out + x * 4, 5, "%04x", unsigned(c.readPixel(x, y)));
+}
+#endif
 
 }  // namespace ui
 }  // namespace cv
