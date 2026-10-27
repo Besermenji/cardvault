@@ -114,7 +114,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The last two manual hardware checks are automated (#17). e2e: the `keys` hook holds keys by their
   keyboard matrix position and adds them to the real key list, so fn/shift state, the library keymap,
   key rolls and auto-repeat all run as for a physical key (it replaces the character-level `press`
-  hook); t28 types every key unshifted and shifted, rolls, fn arrows, repeat, Esc, hold-to-reveal and
+  hook); `keyseq` runs a timed sequence of such sets on the device, so hold times do not depend on
+  the serial round trip; t28 types every key unshifted and shifted, rolls, fn arrows, repeat, Esc, hold-to-reveal and
   Opt. The `sdcut` hook simulates pulling the SD card (MISO held high, now or N ms into the next
   backup write or read); t29 checks that backup and restore end in an error message, that no
   attempt is counted, that G0 locks afterwards and that a half-written backup is refused. Not

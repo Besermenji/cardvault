@@ -60,6 +60,47 @@ void error(const char* s) {
     Serial.println(s);
 }
 
+// "x,y x,y ..." -> keyboard matrix positions (column 0-13, row 0-3).
+bool parse_positions(const std::string& s, std::vector<Point2D_t>& out) {
+    out.clear();
+    size_t i = 0;
+    while (i < s.size()) {
+        if (s[i] == ' ') {
+            i++;
+            continue;
+        }
+        int x = -1, y = -1, n = 0;
+        if (sscanf(s.c_str() + i, "%d,%d%n", &x, &y, &n) != 2 || x < 0 || x >= 14 || y < 0 ||
+            y >= 4)
+            return false;
+        Point2D_t p;
+        p.x = x;
+        p.y = y;
+        out.push_back(p);
+        i += size_t(n);
+    }
+    return true;
+}
+
+// A timed key sequence (`keyseq`): runs on the device, so the hold times do
+// not depend on how fast the host answers. The reply comes after the last step.
+std::vector<std::vector<Point2D_t>> g_seq;
+size_t g_seq_i = 0;
+uint32_t g_seq_ms = 0, g_seq_at = 0;
+bool g_seq_on = false;
+std::string g_seq_id;
+
+void seq_tick() {
+    if (!g_seq_on || int32_t(millis() - g_seq_at) < 0) return;
+    ui::set_sim_keys(g_seq[g_seq_i++]);
+    g_seq_at += g_seq_ms;
+    if (g_seq_i == g_seq.size()) {
+        g_seq_on = false;
+        g_id = g_seq_id;
+        reply("");
+    }
+}
+
 bool key_named(const std::string& n, ui::Key& k) {
     using ui::KeyCode;
     k = ui::Key();
@@ -209,29 +250,45 @@ void handle(ui::App& a, const std::string& request) {
         // keys [x,y ...]: the full set of simulated held keys, as keyboard
         // matrix positions (column x 0-13, row y 0-3); no argument releases all.
         std::vector<Point2D_t> pos;
-        size_t i = 0;
-        bool ok = true;
-        while (ok && i < arg.size()) {
-            if (arg[i] == ' ') {
-                i++;
-                continue;
-            }
-            int x = -1, y = -1, n = 0;
-            ok = sscanf(arg.c_str() + i, "%d,%d%n", &x, &y, &n) == 2 && x >= 0 && x < 14 &&
-                 y >= 0 && y < 4;
-            if (!ok) break;
-            Point2D_t p;
-            p.x = x;
-            p.y = y;
-            pos.push_back(p);
-            i += size_t(n);
-        }
-        if (!ok) {
+        if (g_seq_on) {
+            error("busy");
+        } else if (!parse_positions(arg, pos)) {
             error("bad key position");
         } else {
             ui::set_sim_keys(pos);
             reply("");
         }
+    } else if (cmd == "keyseq") {
+        // keyseq <ms> <set>|<set>|...: apply each set of held keys in turn, <ms>
+        // apart (a set is "x,y x,y"; an empty one releases everything). The reply
+        // comes once the last set is applied, so the last key is held for the
+        // time until then only if a later (empty) set releases it.
+        auto sp2 = arg.find(' ');
+        std::string ms_s = arg.substr(0, sp2);
+        std::string rest = sp2 == std::string::npos ? "" : arg.substr(sp2 + 1);
+        bool ok = !g_seq_on && !ms_s.empty() && ms_s.size() <= 4 &&
+                  ms_s.find_first_not_of("0123456789") == std::string::npos && atoi(ms_s.c_str()) > 0;
+        std::vector<std::vector<Point2D_t>> steps;
+        for (size_t start = 0; ok;) {
+            auto bar = rest.find('|', start);
+            std::vector<Point2D_t> pos;
+            ok = parse_positions(rest.substr(start, bar == std::string::npos ? bar : bar - start), pos);
+            if (!ok) break;
+            steps.push_back(pos);
+            if (bar == std::string::npos) break;
+            start = bar + 1;
+        }
+        if (!ok || steps.empty() || steps.size() > 64) {
+            error(g_seq_on ? "busy" : "keyseq <ms 1-9999> <x,y x,y|x,y|...>");
+            return;
+        }
+        g_seq = steps;
+        g_seq_i = 0;
+        g_seq_ms = uint32_t(atoi(ms_s.c_str()));
+        g_seq_at = millis();
+        g_seq_id = g_id;
+        g_seq_on = true;
+        seq_tick();
     } else if (cmd == "sdcut") {
         // sdcut on|off|<ms>: simulate pulling the SD card now, putting it back,
         // or pulling it <ms> after the next backup write/read starts.
@@ -288,6 +345,7 @@ void begin() {
 }
 
 void poll(ui::App& a) {
+    seq_tick();
     while (Serial.available()) {
         char c = char(Serial.read());
         if (c == '\r') continue;

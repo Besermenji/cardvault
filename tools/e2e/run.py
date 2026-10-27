@@ -239,15 +239,31 @@ class Device:
         key list, key state and keymap); no names releases everything."""
         self.cmd("keys " + " ".join("%d,%d" % KEYPOS[n] for n in names))
 
-    def tap(self, name, *mods, hold=0.04):
-        """Press `name` together with the modifier keys, hold it for `hold`
-        seconds (short of the auto-repeat delay), release."""
-        self.keys(*mods, name)
-        time.sleep(hold)
-        self.keys(*mods)
-        time.sleep(0.02)
-        self.keys()
-        time.sleep(0.02)
+    def keyseq(self, ms, *steps):
+        """Hold each step's keys (a tuple of names; () releases all) in turn,
+        `ms` apart. The device times it, so the holds do not depend on how
+        fast this host answers (a command round trip is about 200 ms)."""
+        sets = "|".join(" ".join("%d,%d" % KEYPOS[n] for n in step) for step in steps)
+        self.cmd(f"keyseq {ms} {sets}", timeout=10 + ms * len(steps) / 1000)
+
+    def tap(self, name, *mods, ms=40):
+        """Press `name` together with the modifier keys, hold it for `ms`
+        (short of the auto-repeat delay), release."""
+        if mods:
+            self.keyseq(ms, (*mods, name), mods, ())
+        else:
+            self.keyseq(ms, (name,), ())
+
+    def roll(self, *names, ms=40):
+        """Press the keys one after the other, each before the last is let go,
+        then release them in the same order."""
+        up = [names[:i + 1] for i in range(len(names))]
+        down = [names[i + 1:] for i in range(len(names))]
+        self.keyseq(ms, *up, *down)
+
+    def hold(self, ms, *names):
+        """Hold the keys for `ms` on the device's clock, then release."""
+        self.keyseq(ms, names, ())
 
     def wait(self, pred, what, timeout=20):
         end = time.time() + timeout
@@ -1650,8 +1666,9 @@ def t28_keyboard_matrix(d):
     if d.state()["screen"] == "unlock":
         d.unlock(pw)
     go_home(d)
+    title = f"Keys{int(time.time()) % 100000}"  # unique, so reruns find only this run's
     new_entry(d, "Note")
-    set_title(d, "Keys")
+    set_title(d, title)
     d.key("down")
     d.key("enter")
     d.screen("text_input", "Text")
@@ -1685,14 +1702,8 @@ def t28_keyboard_matrix(d):
 
     # Key rolls: the next key goes down before the last one is released.
     for roll in (("a", "b"), ("q", "w", "e")):
-        for i in range(len(roll)):
-            d.keys(*roll[:i + 1])
-            time.sleep(0.04)
-        for i in range(len(roll)):
-            d.keys(*roll[i + 1:])
-            time.sleep(0.04)
+        d.roll(*roll)
         expect += "".join(roll)
-    d.keys()
     check(length() == len(expect), f"rolled keys: {length()} vs {len(expect)}")
 
     # fn + ; . , /  move the cursor (Up Down Left Right).
@@ -1715,20 +1726,16 @@ def t28_keyboard_matrix(d):
     expect += "\nab1\ncd2"
     check(length() == len(expect), f"fn arrows: {length()} vs {len(expect)}")
 
-    # Held keys repeat after 450 ms, then every 70 ms.
+    # Held keys repeat after 450 ms, then every 70 ms: 1 + (1200 - 450) / 70 = 11.
     before = length()
-    d.keys("x")
-    time.sleep(1.2)
-    d.keys()
+    d.hold(1200, "x")
     time.sleep(0.2)
     n = length() - before
-    check(9 <= n <= 14, f"held x typed {n} characters in 1.2 s, expected about 11")
+    check(10 <= n <= 12, f"held x typed {n} characters in 1.2 s, expected 11")
     d.key("bs", n)
     # Enter does not repeat.
     before = length()
-    d.keys("enter")
-    time.sleep(1.0)
-    d.keys()
+    d.hold(1000, "enter")
     time.sleep(0.2)
     check(length() - before == 1, f"held enter typed {length() - before} newlines")
     d.key("bs")
@@ -1746,7 +1753,7 @@ def t28_keyboard_matrix(d):
     d.screen("entry_edit")
     save_entry(d)
     d.screen("entry_view")
-    notes = [e for e in d.dump() if e["title"] == "Keys"]
+    notes = [e for e in d.dump() if e["title"] == title]
     check(len(notes) == 1, f"note not saved: {notes}")
     got = notes[0]["fields"]["1"]
     check(got == expect, f"typed text differs:\n  got      {got!r}\n  expected {expect!r}")
@@ -1768,13 +1775,15 @@ def t28_keyboard_matrix(d):
     d.wait(lambda s: info(s)["reveal"] == "1", "opt shows")
     d.tap("opt")
     d.wait(lambda s: info(s)["reveal"] == "0", "opt hides")
-    d.keys("opt")
-    time.sleep(1.0)
-    d.keys()
+    d.hold(1000, "opt")
     d.wait(lambda s: info(s)["reveal"] == "1", "a held opt toggles once")
     d.tap("`", "fn")  # nothing typed: closes without asking
     d.screen("entry_edit")
     go_home(d)
+
+    # Leave the vault as this scenario found it.
+    delete_entry(d, title)
+    check(not any(e["title"] == title for e in d.dump()), "test note left behind")
 
 
 SD_FAIL_TITLES = ("Restore", "Backup failed", "SD card not readable")
@@ -1872,7 +1881,7 @@ def t29_sd_pulled(d):
         # Backup: card pulled N ms into the write (lands in the listing, the
         # file write or the read-back check, depending on N).
         outcomes = {}
-        for ms in (0, 1, 2, 5, 10, 20, 50, 100):
+        for ms in (0, 1, 2, 5, 10, 20, 50, 100, 250, 500):
             open_setting(d, ROW_BACKUP)
             d.screen("text_input", "Backup passphrase", timeout=15)
             d.cmd(f"sdcut {ms}")
