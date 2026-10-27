@@ -9,11 +9,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-  # The pinned design.md CLI used by tools/lint_design.sh (not part of the firmware).
-  - package-ecosystem: npm
-    directory: /tools/design-lint
-    schedule:
-      interval: monthly
-    groups:
-      design-lint:
-        patterns: ["*"]
