@@ -59,7 +59,8 @@ class Device:
         self.unreadable = []  # requests the device could not parse ("ERR -")
         self.noise = []  # serial lines that are not replies (boot output, stray prints)
         self.fragments = []  # tails of reply lines cut by a reconnect (harness traffic)
-        self.typed = set()  # every string of 4+ characters sent with `type`
+        self.fresh = False  # no complete line read since the port was opened
+        self.typed = set()  # every string of 4+ characters sent with `type` (see secrets())
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -73,20 +74,24 @@ class Device:
                 # Keep what the device printed before we ask anything (boot
                 # output): t26 checks it. Replies still queued are stale.
                 self.rx = b""
+                self.fresh = True
                 self._drain()
                 if self.cmd("ping", timeout=2) == "pong":
                     return
             except (serial.SerialException, OSError, Fail):
                 pass
-            self.close()
+            # Lines read while waiting for the ping are already kept; a port
+            # that keeps talking must not cost 2 s per retry.
+            self.close(drain=0.2)
             time.sleep(0.5)
         raise Fail(f"device on {self.port} not responding")
 
-    def close(self):
-        """Read what is left on the link (for t26), then close it."""
+    def close(self, drain=2.0):
+        """Read what is left on the link for up to `drain` seconds (for t26),
+        then close it."""
         try:
             if self.ser:
-                self._drain()
+                self._drain(drain)
         except (serial.SerialException, OSError):
             pass  # the link is already gone (reboot)
         try:
@@ -104,17 +109,20 @@ class Device:
     def _pump(self):
         """Read what has arrived and return the complete reply lines. Other
         lines are device output (`noise`), except the tail of a reply line whose
-        start was lost, which is harness traffic (`fragments`): data replies
-        are JSON and end in } or ], and the firmware prints no JSON itself."""
+        start was lost, which is harness traffic (`fragments`). Only the first
+        line after opening the port can be one (a reconnect cuts at most the
+        line in flight); it counts as a fragment only if it ends like a data
+        reply (JSON: } or ]). Every later line is checked by t26."""
         self.rx += self.ser.read(256)
         replies = []
         while b"\n" in self.rx:
             raw, self.rx = self.rx.split(b"\n", 1)
             text = raw.decode(errors="replace").strip()
+            first, self.fresh = self.fresh, False
             m = REPLY.match(text)
             if m:
                 replies.append(m)
-            elif text.endswith(("}", "]")):
+            elif first and text.endswith(("}", "]")):
                 self.fragments.append(text)
             elif text:
                 self.noise.append(text)  # boot output, CVTEST READY
@@ -129,7 +137,7 @@ class Device:
         self.seq += 1
         rid = str(self.seq)
         if line.startswith("type ") and len(line) >= 9:
-            self.typed.add(line[5:])  # shorter strings would match by chance
+            self.typed.add(line[5:])
         self.ser.write(f"{rid} {line}\n".encode())
         end = time.time() + timeout
         while time.time() < end:
@@ -1441,11 +1449,14 @@ def esptool_read(esptool, port, offset, size, out):
         raise Fail(f"esptool read_flash {hex(offset)} failed: {r.stdout[-300:]} {r.stderr[-300:]}")
 
 
-def secrets(d):
+def secrets(d, min_len=4, extra=()):
     """Everything that must never show up in flash or on the serial port: the
-    passphrases, the TOTP secret and every string of 4+ characters this run
-    typed (shorter ones would match by chance)."""
-    return {P1, P2, P3, TOTP_SECRET} | d.typed
+    passphrases, the TOTP secret and every string of `min_len`+ characters this
+    run typed, plus `extra`. The search ignores case, so each letter matches 2 of
+    256 byte values: a 4-letter string turns up by chance about once per 256 MiB.
+    That is fine for the few KiB of serial output, not for a 1 MiB flash dump
+    searched for dozens of strings, which uses 8+ (once per 2^56 bytes)."""
+    return {s for s in {P1, P2, P3, TOTP_SECRET} | d.typed | set(extra) if len(s) >= min_len}
 
 
 def t25_flash_holds_no_plaintext(d):
@@ -1475,6 +1486,9 @@ def t25_flash_holds_no_plaintext(d):
     passed = False
     try:
         check(find_one(d, title)["fields"]["1"] == body, "canary note not saved")
+        # Whole stored values too: short typed pieces (seed word prefixes,
+        # "milk") are too short to search for, the values they built are not.
+        stored = [v for e in d.dump() for v in [e["title"], *e["fields"].values()]]
         st = assert_vault_stored(d)
         d.close()
         try:
@@ -1500,7 +1514,7 @@ def t25_flash_holds_no_plaintext(d):
         check(len(used) > 1000, f"the vault partition looks empty ({len(used)} bytes used)")
         for name, data in (("vault partition", vdata), ("NVS partition", ndata)):
             folded = data.lower()
-            for s in sorted(secrets(d)):
+            for s in sorted(secrets(d, min_len=8, extra=stored)):
                 check(s.lower().encode() not in folded, f"plaintext {s!r} found in the {name}")
         # Beyond known strings: ciphertext has no long printable runs (random
         # bytes give one of 24+ about once in 20,000 MiB). The names LittleFS
