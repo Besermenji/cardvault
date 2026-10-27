@@ -18,6 +18,16 @@ pio run -e cardputer -t upload  # flash (hold G0 while powering on if needed)
 pio test -e native              # run host unit tests
 ```
 
+## Build environments
+
+- `cardputer` is the only release environment. It must not set any `-DCV_*` flag
+  (`tools/check_release_flags.py` checks this in CI).
+- `cardputer-debug` (screenshots) and `cardputer-e2e` (test hooks) use the test partition table and
+  their own NVS namespaces, and refuse to start over a release install, so they never touch a real vault.
+  `CV_TEST_DELAY_DIV` and `CV_REVEAL_MS` are only accepted together with `CV_TEST_HOOKS`.
+- `tools/merge_bin.sh <version> <out_dir> <env>` can merge other environments for flashing, but names the
+  result `...-NOT-FOR-RELEASE.bin`.
+
 ## Rules for security-sensitive code
 
 - Never log secrets, passphrases, keys or decrypted content (not even in debug builds).

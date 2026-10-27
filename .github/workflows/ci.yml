@@ -48,7 +48,7 @@ jobs:
       - name: Release environment is a plain build
         run: python3 tools/check_release_flags.py
 
-      - name: Merge image (checked: vault at 0x310000, no test or debug code)
+      - name: Merge image, checking vault address and test or debug code
         run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
       - name: Debug, e2e and on-device test builds compile
