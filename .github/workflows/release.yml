@@ -17,6 +17,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Donation addresses and QR codes match everywhere
+        run: |
+          pip install -r tools/support-requirements.txt
+          python3 tools/support.py
+          # Read, never source, the file; support.py has checked both values are plain alphanumerics.
+          echo "BTC=$(sed -n 's/^BTC=//p' docs/support/addresses.env)" >> "$GITHUB_ENV"
+          echo "ETH=$(sed -n 's/^ETH=//p' docs/support/addresses.env)" >> "$GITHUB_ENV"
+
       - name: Install PlatformIO
         run: pip install platformio==6.1.19
 
@@ -41,6 +49,7 @@ jobs:
           v="${v%%-*}"
           awk -v v="$v" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
+          printf '\n### Support\n\n- BTC `%s`\n- ETH `%s`\n' "$BTC" "$ETH" >> notes.md
 
       - name: Publish GitHub release
         env:
@@ -57,6 +66,12 @@ jobs:
           cp -r docs/flasher/* site/
           cp release/cardvault-*-cardputer-adv.bin site/cardvault.bin
           sed -i "s/__VERSION__/${GITHUB_REF_NAME#v}/" site/manifest.json site/index.html
+          sed -i "s/__BTC__/$BTC/; s/__ETH__/$ETH/" site/index.html
+          grep -qF "$BTC" site/index.html || { echo "BTC address missing from the flasher"; exit 1; }
+          grep -qF "$ETH" site/index.html || { echo "ETH address missing from the flasher"; exit 1; }
+          if grep -nE '__[A-Z]+__' site/index.html site/manifest.json; then
+            echo "unfilled placeholder in the flasher"; exit 1
+          fi
 
       - uses: actions/upload-pages-artifact@v3
         if: ${{ !github.event.repository.private }}

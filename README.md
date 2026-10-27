@@ -137,6 +137,19 @@ on the device. The hotkey exists only in the debug build; CI checks that release
 Layout: `src/crypto`, `src/vault`, `src/features`, `src/security` are Arduino-free and unit tested;
 `src/platform` talks to the hardware; `src/ui` holds the screens. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Support
+
+CardVault is free and MIT licensed. If it keeps your secrets safe, a donation pays for hardware and
+development time.
+
+| Bitcoin | Ethereum |
+|:---:|:---:|
+| <img src="docs/flasher/btc.svg" width="160" alt="Bitcoin QR code"> | <img src="docs/flasher/eth.svg" width="160" alt="Ethereum QR code"> |
+| `bc1qwa2d9rg06dz97rdcjg00cy3j9myevawq9075fy` | `0xa263474B98a69478aaeb7ac5562f1647D3c24712` |
+
+These are the only donation addresses. If you see different ones somewhere else, check them against
+this repository ([`docs/support/addresses.env`](docs/support/addresses.env); CI checks every copy).
+
 ## License
 
 [MIT](LICENSE). Monocypher is vendored under its own BSD-2-Clause / CC0 license.
