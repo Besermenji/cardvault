@@ -12,12 +12,6 @@ namespace ui {
 namespace {
 KeyStream g_stream;
 
-#ifdef CV_TEST_HOOKS
-// Simulated physical key (test builds): scanned like a real one, so it takes
-// the same press/repeat path. Marked with x = -1, y = the character.
-char g_sim_down = 0;
-#endif
-
 bool make_key(const Point2D_t& pos, const Keyboard_Class::KeysState& st, Key& k) {
     auto& kb = M5Cardputer.Keyboard;
     KeyValue_t v = kb.getKeyValue(pos);
@@ -65,17 +59,7 @@ bool poll_key(Key& out) {
     auto& kb = M5Cardputer.Keyboard;
     std::vector<KeyPos> down;
     for (auto& p : kb.keyList()) down.push_back({p.x, p.y});
-#ifdef CV_TEST_HOOKS
-    if (g_sim_down) down.push_back({-1, g_sim_down});
-#endif
     g_stream.scan(down, millis(), [&kb](const KeyPos& pos, Key& k) {
-#ifdef CV_TEST_HOOKS
-        if (pos.x == -1) {
-            k = Key();
-            k.ch = char(pos.y);
-            return true;
-        }
-#endif
         Point2D_t p;
         p.x = pos.x;
         p.y = pos.y;
@@ -91,7 +75,6 @@ namespace {
 char g_held_override = 0;
 }
 void inject_key(const Key& k) { g_stream.inject(k); }
-void set_sim_pressed(char c) { g_sim_down = c; }
 void set_held_override(char c, bool held) { g_held_override = held ? c : 0; }
 bool key_held(char c) {
     return (g_held_override && g_held_override == c) || M5Cardputer.Keyboard.isKeyPressed(c);

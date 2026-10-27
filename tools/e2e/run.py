@@ -35,6 +35,28 @@ P3 = "backup phrase 99"
 SD_CARD = False  # set by --sd
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
+# The Cardputer keyboard matrix (column x 0-13, row y 0-3), copied from
+# M5Cardputer 1.1.1 (utility/Keyboard/Keyboard.h, _key_value_map; the version is
+# pinned in platformio.ini). Printable keys: (unshifted, shifted); the others
+# are named.
+_MATRIX = [
+    list(zip("`1234567890-=", "~!@#$%^&*()_+")) + ["bs"],
+    ["tab"] + list(zip("qwertyuiop[]\\", "QWERTYUIOP{}|")),
+    ["fn", "shift"] + list(zip("asdfghjkl;'", 'ASDFGHJKL:"')) + ["enter"],
+    ["ctrl", "opt", "alt"] + list(zip("zxcvbnm,./", "ZXCVBNM<>?")) + ["space"],
+]
+KEYPOS = {}      # key name -> (x, y); a printable key is named by its unshifted character
+PRINTABLE = []   # (name, unshifted, shifted) for every key that types a character
+for _y, _row in enumerate(_MATRIX):
+    assert len(_row) == 14, _row
+    for _x, _k in enumerate(_row):
+        if isinstance(_k, tuple):
+            KEYPOS[_k[0]] = (_x, _y)
+            PRINTABLE.append((_k[0], _k[0], _k[1]))
+        else:
+            KEYPOS[_k] = (_x, _y)
+PRINTABLE.append(("space", " ", " "))
+
 
 class Fail(Exception):
     pass
@@ -211,6 +233,37 @@ class Device:
     def type(self, text):
         self.cmd(f"type {text}")
         time.sleep(0.05)
+
+    def keys(self, *names):
+        """Hold exactly these keys (matrix positions through the library's own
+        key list, key state and keymap); no names releases everything."""
+        self.cmd("keys " + " ".join("%d,%d" % KEYPOS[n] for n in names))
+
+    def keyseq(self, ms, *steps):
+        """Hold each step's keys (a tuple of names; () releases all) in turn,
+        `ms` apart. The device times it, so the holds do not depend on how
+        fast this host answers (a command round trip is about 200 ms)."""
+        sets = "|".join(" ".join("%d,%d" % KEYPOS[n] for n in step) for step in steps)
+        self.cmd(f"keyseq {ms} {sets}", timeout=10 + ms * len(steps) / 1000)
+
+    def tap(self, name, *mods, ms=40):
+        """Press `name` together with the modifier keys, hold it for `ms`
+        (short of the auto-repeat delay), release."""
+        if mods:
+            self.keyseq(ms, (*mods, name), mods, ())
+        else:
+            self.keyseq(ms, (name,), ())
+
+    def roll(self, *names, ms=40):
+        """Press the keys one after the other, each before the last is let go,
+        then release them in the same order."""
+        up = [names[:i + 1] for i in range(len(names))]
+        down = [names[i + 1:] for i in range(len(names))]
+        self.keyseq(ms, *up, *down)
+
+    def hold(self, ms, *names):
+        """Hold the keys for `ms` on the device's clock, then release."""
+        self.keyseq(ms, names, ())
 
     def wait(self, pred, what, timeout=20):
         end = time.time() + timeout
@@ -1088,12 +1141,12 @@ def t22_confirm_and_validation(d):
     d.key("tab")
     d.menu_pick("Delete")
     d.screen("confirm", "Delete secret?")
-    d.cmd("press y 1")
+    d.keys("y")
     try:
         st = d.screen("home")
         time.sleep(1.5)  # > 450 ms repeat delay
     finally:
-        d.cmd("press y 0")
+        d.keys()
     st = d.state()
     check(st["entries"] == stored, f"held Y should have deleted {memo}: {st}")
     check(info(st)["query"] == memo, f"held Y repeated into the next screen: {st}")
@@ -1605,6 +1658,310 @@ def t27_screenshot_hook(d):
           (before["screen"], before["title"], before["depth"]), f"shot changed the screen: {after}")
 
 
+def t28_keyboard_matrix(d):
+    """Keys held on the keyboard matrix (the `keys` hook) go through the
+    library's own key list, key state and keymap, then our key mapping,
+    rolls and auto-repeat. Not covered: the I2C read and the switches."""
+    pw = P3 if SD_CARD else P1  # see t22
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+    title = f"Keys{int(time.time()) % 100000}"  # unique, so reruns find only this run's
+    new_entry(d, "Note")
+    set_title(d, title)
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+
+    def length():
+        return int(info(d.state())["len"])
+
+    expect = ""
+
+    # Every printable key, unshifted and then shifted together with Shift.
+    for name, plain, _ in PRINTABLE:
+        d.tap(name)
+        expect += plain
+    for name, _, shifted in PRINTABLE:
+        d.tap(name, "shift")
+        expect += shifted
+    check(length() == len(expect), f"typed {length()} characters, expected {len(expect)}")
+
+    # Modifiers and Opt alone type nothing.
+    for name in ("fn", "shift", "ctrl", "alt", "opt"):
+        d.tap(name)
+    check(length() == len(expect), f"a modifier alone typed a character: {length()}")
+
+    # Enter and Backspace from the matrix.
+    d.tap("enter")
+    d.tap("a")
+    d.tap("b")
+    d.tap("bs")
+    expect += "\na"
+    check(length() == len(expect), f"enter/backspace: {length()} vs {len(expect)}")
+
+    # Key rolls: the next key goes down before the last one is released.
+    for roll in (("a", "b"), ("q", "w", "e")):
+        d.roll(*roll)
+        expect += "".join(roll)
+    check(length() == len(expect), f"rolled keys: {length()} vs {len(expect)}")
+
+    # fn + ; . , /  move the cursor (Up Down Left Right).
+    d.tap("x")
+    d.tap(",", "fn")  # Left
+    d.tap("y")
+    d.tap("/", "fn")  # Right
+    d.tap("z")
+    expect += "yxz"
+    d.tap("enter")
+    d.tap("a")
+    d.tap("b")
+    d.tap("enter")
+    d.tap("c")
+    d.tap("d")
+    d.tap(";", "fn")  # Up: end of "ab"
+    d.tap("1")
+    d.tap(".", "fn")  # Down: end of "cd"
+    d.tap("2")
+    expect += "\nab1\ncd2"
+    check(length() == len(expect), f"fn arrows: {length()} vs {len(expect)}")
+
+    # Held keys repeat after 450 ms, then every 70 ms: 1 + (1200 - 450) / 70 = 11.
+    before = length()
+    d.hold(1200, "x")
+    time.sleep(0.2)
+    n = length() - before
+    check(10 <= n <= 12, f"held x typed {n} characters in 1.2 s, expected 11")
+    d.key("bs", n)
+    # Enter does not repeat.
+    before = length()
+    d.hold(1000, "enter")
+    time.sleep(0.2)
+    check(length() - before == 1, f"held enter typed {length() - before} newlines")
+    d.key("bs")
+    check(length() == len(expect), f"after repeat checks: {length()} vs {len(expect)}")
+
+    # fn + ` is Esc: asks before dropping the text; declining keeps it.
+    d.tap("`", "fn")
+    d.screen("confirm", "Discard changes?")
+    d.key("n")
+    st = d.screen("text_input", "Text")
+    check(int(info(st)["len"]) == len(expect), f"declining lost text: {st}")
+
+    # Tab finishes the editor, then the note is stored exactly as typed.
+    d.tap("tab")
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    notes = [e for e in d.dump() if e["title"] == title]
+    check(len(notes) == 1, f"note not saved: {notes}")
+    got = notes[0]["fields"]["1"]
+    check(got == expect, f"typed text differs:\n  got      {got!r}\n  expected {expect!r}")
+
+    # Hold Space to reveal (the held-key path: isKeyPressed on the real key list).
+    check(info(d.state())["held"] == "0", "space must start released")
+    d.keys("space")
+    d.wait(lambda s: info(s).get("held") == "1", "hold-to-reveal with a held matrix key")
+    d.keys()
+    d.wait(lambda s: info(s).get("held") == "0", "release hides again")
+
+    # Opt toggles reveal in a masked field, once per press, not while held.
+    new_entry(d, "Password")
+    d.key("down", 2)
+    d.key("enter")
+    st = d.screen("text_input", "Password")
+    check(info(st)["reveal"] == "0", f"masked field must start hidden: {st}")
+    d.tap("opt")
+    d.wait(lambda s: info(s)["reveal"] == "1", "opt shows")
+    d.tap("opt")
+    d.wait(lambda s: info(s)["reveal"] == "0", "opt hides")
+    d.hold(1000, "opt")
+    d.wait(lambda s: info(s)["reveal"] == "1", "a held opt toggles once")
+    d.tap("`", "fn")  # nothing typed: closes without asking
+    d.screen("entry_edit")
+    go_home(d)
+
+    # Leave the vault as this scenario found it.
+    delete_entry(d, title)
+    check(not any(e["title"] == title for e in d.dump()), "test note left behind")
+
+
+SD_FAIL_TITLES = ("Restore", "Backup failed", "SD card not readable")
+
+
+def wait_message(d, titles, timeout=60):
+    """Wait for a message screen with one of `titles` while the device may be
+    stuck in a long SD call (state requests then go unanswered for a while).
+    Returns (state, seconds waited)."""
+    t0 = time.time()
+    last = None
+    while time.time() - t0 < timeout:
+        try:
+            last = d.state()
+        except Fail:
+            continue  # busy inside the SD driver; its answer comes later
+        if last["screen"] == "message" and last["title"] in titles:
+            return last, time.time() - t0
+        time.sleep(0.2)
+    raise Fail(f"no {titles} message within {timeout} s; last state: {last}")
+
+
+def backup_now(d):
+    """Settings > Backup to SD with the P3 passphrase; returns the file name."""
+    open_setting(d, ROW_BACKUP)
+    d.screen("text_input", "Backup passphrase", timeout=15)
+    d.type(P3)
+    d.key("enter")
+    d.screen("text_input", "Confirm passphrase")
+    d.type(P3)
+    d.key("enter")
+    st = d.screen("message", "Backup saved", timeout=60)
+    name = backup_name_in(st)
+    d.key("enter")
+    return name
+
+
+def restore_menu_names(d):
+    """Open Settings > Restore from SD and return the backup names, newest first."""
+    open_setting(d, ROW_RESTORE)
+    st = d.screen("menu", "Choose backup", timeout=15)
+    return info(st)["items"].split("|")
+
+
+def t29_sd_pulled(d):
+    """Pulling the card during a backup or restore ends in an error message,
+    never a freeze, and G0 locks afterwards. The pull is simulated by holding
+    the SPI MISO input high (`sdcut`): the real SD driver and FAT code fail
+    the way they do with no card. G0 is not serviced while the main loop is
+    inside a blocking SD call, so it is pressed once the message is up."""
+    need_card()
+    pw = P3
+
+    def g0_locks():
+        d.cmd("g0")
+        d.screen("unlock")
+        d.unlock(pw)
+
+    def finish_failed(titles):
+        """After a pull: the message is shown, the vault is untouched, G0 locks."""
+        st, waited = wait_message(d, titles)
+        d.cmd("sdcut off")
+        check(d.cmd("ping") == "pong", "device does not answer after the pull")
+        check(st["fails"] == 0, f"a pulled card must not count an attempt: {st}")
+        d.key("enter")
+        g0_locks()
+        return waited
+
+    d.cmd("sdcut off")
+    try:
+        if d.state()["screen"] == "unlock":
+            d.unlock(pw)
+        before = d.dump()
+        backup_now(d)  # a good backup, so the card is never empty ("No backups")
+        known = set(restore_menu_names(d))  # backups on the card before any pull
+        go_home(d)
+
+        # Restore: card pulled with the list on screen, before a file is read.
+        restore_menu_names(d)
+        d.cmd("sdcut on")
+        d.key("enter")
+        finish_failed(("Restore", "SD card not readable"))
+
+        # Backup: card pulled while the passphrase is asked for.
+        open_setting(d, ROW_BACKUP)
+        d.screen("text_input", "Backup passphrase", timeout=15)
+        d.cmd("sdcut on")
+        d.type(P3)
+        d.key("enter")
+        d.screen("text_input", "Confirm passphrase")
+        d.type(P3)
+        d.key("enter")
+        finish_failed(("Backup failed", "SD card not readable"))
+
+        # Backup: card pulled N ms into the write (lands in the listing, the
+        # file write or the read-back check, depending on N).
+        outcomes = {}
+        for ms in (0, 1, 2, 5, 10, 20, 50, 100, 250, 500):
+            open_setting(d, ROW_BACKUP)
+            d.screen("text_input", "Backup passphrase", timeout=15)
+            d.cmd(f"sdcut {ms}")
+            d.type(P3)
+            d.key("enter")
+            d.screen("text_input", "Confirm passphrase")
+            d.type(P3)
+            d.key("enter")
+            st, waited = wait_message(d, ("Backup saved",) + SD_FAIL_TITLES)
+            outcomes[ms] = (st["title"], round(waited, 1))
+            check(waited < 40, f"cut after {ms} ms: {waited:.0f} s to report: {st}")
+            d.cmd("sdcut off")
+            check(st["fails"] == 0, f"cut after {ms} ms counted an attempt: {st}")
+            d.key("enter")
+            g0_locks()
+        print(f"  cut after N ms -> (message, seconds): {outcomes}", flush=True)
+        check(any(t != "Backup saved" for t, _ in outcomes.values()),
+              f"no cut ever made a backup fail: {outcomes}")
+
+        # Whatever the cuts left on the card: a file that is not a complete
+        # backup is refused, and nothing replaces the vault.
+        d.cmd("sdcut off")
+        names = restore_menu_names(d)
+        left = [n for n in names if n not in known]
+        go_home(d)
+        for name in left:
+            names = restore_menu_names(d)
+            d.key("down", names.index(name))
+            d.key("enter")
+            st = d.state()
+            if st["screen"] == "message":  # unreadable: refused before the prompt
+                check(st["title"] in SD_FAIL_TITLES, f"{name}: {st}")
+                d.key("enter")
+                continue
+            d.screen("text_input", "Backup passphrase")
+            d.type(P3)
+            d.key("enter")
+            st = d.wait(lambda s: s["screen"] in ("confirm", "message"), f"result for {name}", 30)
+            if st["screen"] == "confirm":
+                check(st["title"] == "Replace vault?", f"{name}: {st}")
+                d.key("n")  # a complete backup: fine, keep the vault
+            else:
+                check(st["title"] == "Restore failed", f"{name}: {st}")
+                d.key("enter")
+            check(st["fails"] == 0, f"{name}: restore guess counted: {st}")
+        go_home(d)
+        check(d.dump() == before, "a pulled card changed the vault")
+
+        # And the card still works: backup, change the vault, restore it.
+        good = backup_now(d)
+        new_entry(d, "Note")
+        set_title(d, "After pulls")
+        d.key("down")
+        d.key("enter")
+        d.screen("text_input", "Text")
+        d.type("temp")
+        d.key("tab")
+        d.screen("entry_edit")
+        save_entry(d)
+        d.screen("entry_view")
+        check(len(d.dump()) == len(before) + 1, "note not added")
+        names = restore_menu_names(d)
+        check(names[0] == good, f"newest backup not first: {names}")
+        d.key("enter")
+        d.screen("text_input", "Backup passphrase")
+        d.type(P3)
+        d.key("enter")
+        d.screen("confirm", "Replace vault?", timeout=30)
+        d.key("y")
+        d.screen("confirm", "Restored", timeout=30)
+        d.key("n")
+        d.screen("home")
+        check(d.dump() == before, "restore after the pulls did not bring back the vault")
+    finally:
+        try:
+            d.cmd("sdcut off")
+        except Fail:
+            pass
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 
@@ -1623,7 +1980,15 @@ def main():
             continue
         t0 = time.time()
         try:
-            fn(d)
+            try:
+                fn(d)
+            finally:
+                # A scenario that stopped half way must not leave a simulated
+                # key held for the next one.
+                try:
+                    d.cmd("keys", timeout=5)
+                except Exception:
+                    pass
             passed += 1
             print(f"PASS {fn.__name__} ({time.time() - t0:.1f}s)", flush=True)
         except Skip as e:

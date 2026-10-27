@@ -9,6 +9,7 @@
 #include "test_hooks.h"
 #include "ui/app.h"
 #include "ui/gfx.h"
+#include "ui/sim_keyboard.h"
 
 using namespace cv;
 using namespace cv::ui;
@@ -145,6 +146,7 @@ void setup() {
 
 void loop() {
     M5Cardputer.update();
+    apply_sim_keys();  // test builds: simulated held keys (no-op in release)
     App& a = app();
     // Keys queued or held for the old screen must not reach the next one.
     auto navigate = [&a] {
