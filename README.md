@@ -8,6 +8,14 @@ encrypted with a passphrase only you know. No Wi-Fi. No Bluetooth. No cloud.
 > ⚠️ **Early software (v0.x).** Always keep an independent backup (paper/metal) of any seed phrase.
 > Read the [threat model](#security-model) before trusting CardVault with real funds.
 
+<p align="center">
+  <img src="docs/screenshots/home.png" width="240" alt="Home: list of secrets">
+  <img src="docs/screenshots/entry.png" width="240" alt="A password entry, masked">
+  <img src="docs/screenshots/totp.png" width="240" alt="Live 2FA codes">
+  <img src="docs/screenshots/seed.png" width="240" alt="A seed phrase, masked">
+</p>
+<p align="center"><sub>Real screens from the device, with made-up data.</sub></p>
+
 ## Features
 
 | | |
@@ -156,9 +164,12 @@ pio run -e cardputer      # firmware
 tools/merge_bin.sh 0.1.0  # single image in release/
 ```
 
-**Screenshots** (dummy data only!): flash `pio run -e cardputer-debug -t upload`, run
-`python3 tools/screenshot.py /dev/cu.usbmodem*` (needs `pyserial`) and press <kbd>ctrl</kbd>+<kbd>S</kbd>
-on the device. The hotkey exists only in the debug build, which runs on the test partition table (its vault
+**Screenshots** (dummy data only!): flash `pio run -e cardputer-e2e -t upload` (with no SD card in), then run
+`python3 tools/screenshots.py /dev/cu.usbmodem* --yes` (needs `pyserial`). It erases the e2e test vault, adds made-up
+entries, drives the real UI to each main screen and writes the PNGs in `docs/screenshots/` (including
+`cover.png` for M5Burner). For a one-off capture of any screen, flash `pio run -e cardputer-debug -t upload`, run
+`python3 tools/screenshot.py /dev/cu.usbmodem*` and press <kbd>ctrl</kbd>+<kbd>S</kbd> on the device.
+Neither the e2e nor the debug build is a release build; the hotkey exists only in the debug build, which runs on the test partition table (its vault
 partition has a different label) with its own settings, so it cannot open a real vault and always starts with an
 empty demo vault. CI checks that release images don't contain it.
 

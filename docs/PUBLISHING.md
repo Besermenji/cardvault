@@ -31,7 +31,8 @@ Publishing needs the maintainer's M5Stack community account, so it is done by ha
      `Support: BTC bc1qwa2d9rg06dz97rdcjg00cy3j9myevawq9075fy / ETH 0xa263474B98a69478aaeb7ac5562f1647D3c24712`
    - GitHub: `https://github.com/Besermenji/cardvault`
    - Firmware: `cardvault-vX.Y.Z-cardputer-adv.bin` (merged image, flashed at `0x0`)
-   - Cover: a 240×135 screenshot of the home screen.
+   - Cover: `docs/screenshots/cover.png` (240×135, the home screen). `python3 tools/screenshots.py <port> --yes`
+     regenerates it.
 4. Submit and wait for the listing to appear.
 
 ## Launcher

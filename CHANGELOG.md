@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Screenshots in the README and an M5Burner cover (#19). `tools/screenshots.py` drives a Cardputer
+  running the e2e build through the real UI with made-up data and saves a PNG of each main screen;
+  the e2e build got a `shot` command for it (e2e t27). Release images are unchanged.
 - Support section with BTC/ETH donation addresses and QR codes in the README, the web flasher,
   release notes and the M5Burner description, plus a GitHub Sponsor button (#54). The addresses live
   in `docs/support/addresses.env`; `tools/support.py` (run in CI and before every release) checks their checksums, the QR codes
