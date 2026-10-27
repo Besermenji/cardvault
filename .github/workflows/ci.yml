@@ -12,9 +12,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
 
@@ -24,7 +24,7 @@ jobs:
           python3 tools/support.py
 
       - name: Cache PlatformIO
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.platformio
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
@@ -45,13 +45,14 @@ jobs:
           echo "firmware.bin: $size bytes (budget $budget)"
           test "$size" -le "$budget"
 
-      - name: Release build must not contain debug or test code
-        run: |
-          for marker in CVSHOT "CVTEST READY" cvt_guard "unknown command" "bad request" magic_hits; do
-            if LC_ALL=C grep -a -q "$marker" .pio/build/cardputer/firmware.bin; then
-              echo "release firmware contains test/debug marker: $marker"; exit 1
-            fi
-          done
+      - name: Web flasher has no external code and a strict CSP
+        run: tools/check_flasher.sh
+
+      - name: Release environment is a plain build
+        run: python3 tools/check_release_flags.py
+
+      - name: Merge image, checking vault address and test or debug code
+        run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
       - name: Debug, e2e and on-device test builds compile
         run: |
@@ -59,10 +60,26 @@ jobs:
           pio run -e cardputer-e2e
           pio test -e cardputer-test --without-uploading --without-testing
 
-      - name: Merge image
-        run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
+      # Positive controls: the release check must reject images that really do
+      # contain what it looks for, otherwise a passing check proves nothing.
+      - name: Release image check rejects debug and e2e images
+        run: |
+          expect_fail() {  # <env> <reason>...
+            env_name=$1; shift
+            tools/merge_bin.sh control control-out "$env_name"
+            img="control-out/cardvault-vcontrol-${env_name}-NOT-FOR-RELEASE.bin"
+            if tools/check_release_image.sh "$img" 2> control.err; then
+              echo "check accepted the $env_name image"; exit 1
+            fi
+            for reason in "$@"; do
+              grep -qF "$reason" control.err || {
+                echo "check did not report '$reason' for $env_name:"; cat control.err; exit 1; }
+            done
+          }
+          expect_fail cardputer-debug "no 'vault' partition" "test partition 'cvtvault'" "marker: CVSHOT" "marker: cvtvault"
+          expect_fail cardputer-e2e "no 'vault' partition" "test partition 'cvtvault'" "marker: CVTEST" "marker: unknown command"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cardvault-firmware
           path: release/

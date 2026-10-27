@@ -9,8 +9,8 @@ the "No SD card" paths. With --sd a FAT32 card must be inserted: backup,
 restore (also from the setup screen, #43) and Compact run against it, and
 leave backup-*.cvb files in /cardvault on the card.
 
-The e2e firmware keeps its vault at 0x410000 and uses separate NVS
-namespaces, so a real vault on the device is never touched. Requires
+The e2e firmware keeps its vault in its own "cvtvault" partition (0x410000) and
+uses separate NVS namespaces, so a real vault on the device is never touched. Requires
 pyserial (PlatformIO's Python has it).
 """
 import argparse

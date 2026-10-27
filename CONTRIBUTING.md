@@ -18,6 +18,18 @@ pio run -e cardputer -t upload  # flash (hold G0 while powering on if needed)
 pio test -e native              # run host unit tests
 ```
 
+## Build environments
+
+- `cardputer` is the only release environment. It may only define the `-D` flags on the allow-list in
+  `tools/check_release_flags.py` (no `-DCV_*`); CI checks this.
+- `cardputer-debug` (screenshots), `cardputer-e2e` (test hooks) and `cardputer-test` use the test partition
+  table, whose vault partition is labelled `cvtvault` instead of `vault`, and their own NVS namespaces.
+  They cannot open a real vault. Flash them with `pio run -e <env> -t upload`, which writes the partition
+  table too. `CV_TEST_DELAY_DIV` and `CV_REVEAL_MS` are only accepted together with `CV_TEST_HOOKS`.
+- When `partitions.csv` changes, `tools/check_release_image.sh` follows it (it reads the vault row from there).
+- `tools/merge_bin.sh <version> <out_dir> <env>` can merge other environments for flashing, but names the
+  result `...-NOT-FOR-RELEASE.bin`.
+
 ## Rules for security-sensitive code
 
 - Never log secrets, passphrases, keys or decrypted content (not even in debug builds).

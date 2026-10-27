@@ -11,8 +11,14 @@
 #include "vault/session.h"
 
 // How long a revealed secret stays visible without being hidden again.
+// Only test builds may shorten it: a flag in a release build would leave no
+// trace in the binary for the release check to find.
 #ifndef CV_REVEAL_MS
 #define CV_REVEAL_MS 20000
+#elif !defined(CV_TEST_HOOKS)
+#error "CV_REVEAL_MS may only be set together with CV_TEST_HOOKS"
+#elif CV_REVEAL_MS < 1000
+#error "CV_REVEAL_MS must be at least 1000"
 #endif
 
 namespace cv {

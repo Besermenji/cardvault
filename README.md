@@ -132,7 +132,9 @@ tools/merge_bin.sh 0.1.0  # single image in release/
 
 **Screenshots** (dummy data only!): flash `pio run -e cardputer-debug -t upload`, run
 `python3 tools/screenshot.py /dev/cu.usbmodem*` (needs `pyserial`) and press <kbd>ctrl</kbd>+<kbd>S</kbd>
-on the device. The hotkey exists only in the debug build; CI checks that release images don't contain it.
+on the device. The hotkey exists only in the debug build, which runs on the test partition table (its vault
+partition has a different label) with its own settings, so it cannot open a real vault and always starts with an
+empty demo vault. CI checks that release images don't contain it.
 
 Layout: `src/crypto`, `src/vault`, `src/features`, `src/security` are Arduino-free and unit tested;
 `src/platform` talks to the hardware; `src/ui` holds the screens. See [CONTRIBUTING.md](CONTRIBUTING.md).

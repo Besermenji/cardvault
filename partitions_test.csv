@@ -1,7 +1,8 @@
-# Test builds only. The vault lives at 0x410000 so tests never touch a real
-# vault at 0x310000 (production table); NVS uses separate namespaces.
+# Test builds only. The vault partition has its own label, so a test build
+# can never open the production "vault" partition (partitions.csv). Its
+# address differs too; NVS uses separate namespaces.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  ota_0,   0x10000,  0x300000,
-vault,    data, spiffs,  0x410000, 0x100000,
+cvtvault, data, spiffs,  0x410000, 0x100000,

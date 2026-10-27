@@ -6,8 +6,13 @@
 
 #include <M5Cardputer.h>
 
+// Divides the wrong-passphrase delay. Only test builds may set it (see CV_REVEAL_MS).
 #ifndef CV_TEST_DELAY_DIV
 #define CV_TEST_DELAY_DIV 1
+#elif !defined(CV_TEST_HOOKS)
+#error "CV_TEST_DELAY_DIV may only be set together with CV_TEST_HOOKS"
+#elif CV_TEST_DELAY_DIV < 1
+#error "CV_TEST_DELAY_DIV must be at least 1"
 #endif
 
 namespace cv {

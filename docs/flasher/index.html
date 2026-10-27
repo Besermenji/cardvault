@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CardVault Flasher</title>
-  <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self' data:; form-action 'none'; base-uri 'none'">
+  <script type="module" src="vendor/esp-web-tools/install-button.js"></script>
   <style>
     :root { --bg: #f6f7f9; --fg: #14171f; --muted: #5b6475; --card: #ffffff; --accent: #c96f00; --line: #dde1e8; }
     @media (prefers-color-scheme: dark) {
@@ -28,6 +29,7 @@
     figure { margin: 0; text-align: center; }
     figure img { width: 160px; height: 160px; border-radius: 8px; }
     figcaption { margin-top: 8px; font-size: 14px; }
+    code.hash { display: inline-block; word-break: break-all; user-select: all; }
     figcaption code { display: inline-block; margin-top: 4px; word-break: break-all; user-select: all; }
   </style>
 </head>
@@ -50,6 +52,10 @@
       If you already use CardVault, make an SD backup first — erasing the flash erases the vault.
       Verify the image checksum against the
       <a href="https://github.com/Besermenji/cardvault/releases">GitHub release</a>.
+      <p class="sub support-sub">SHA-256 of the image this page installs:<br><code class="hash">__SHA256__</code></p>
+      <p class="sub support-sub">The image is built by the release workflow from the tagged source. Check it with
+        <code>gh attestation verify cardvault-v__VERSION__-cardputer-adv.bin --repo Besermenji/cardvault</code>.
+        This page serves its own copy of esp-web-tools, with no code from other hosts.</p>
     </div>
 
     <div class="card">

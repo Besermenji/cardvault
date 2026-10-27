@@ -1,9 +1,15 @@
-// Vault blob on the internal flash ("vault" LittleFS partition).
+// Vault blob on the internal flash (LittleFS partition CV_VAULT_LABEL, "vault" in releases).
 // begin() returns false when the partition is missing or not mountable;
 // has_partition() tells the two apart.
 #pragma once
 
 #include "vault/storage.h"
+
+// Label of the partition that holds the vault. Test and debug builds use their
+// own ("cvtvault", partitions_test.csv), so they cannot even open a real vault.
+#ifndef CV_VAULT_LABEL
+#define CV_VAULT_LABEL "vault"
+#endif
 
 namespace cv {
 

@@ -47,6 +47,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware.
 
 ### Security
+- Release and CI hardening (#40). The release check (`tools/check_release_image.sh`) runs on the
+  merged image that ships: the vault partition must be at 0x310000 and no test or debug code may be
+  in it; CI proves the check fails on the e2e and debug images, and `merge_bin.sh` refuses
+  `PLATFORMIO_BUILD_FLAGS`. `CV_TEST_DELAY_DIV` and `CV_REVEAL_MS` are a compile error without
+  `CV_TEST_HOOKS`. The e2e, debug and device-test builds use a partition table whose vault partition is
+  labelled `cvtvault` (and their own NVS namespaces), so they cannot open a real vault, and the
+  release check rejects an image that has that partition or label. The web flasher serves
+  its own pinned copy of esp-web-tools under a Content-Security-Policy, and shows the image's SHA-256.
+  Releases need a tag on `main` that CI built successfully and release notes (a prerelease uses its
+  own section or `[Unreleased]`, never an earlier release's), are built without write access, get a build attestation once the repo is public, and prerelease tags no longer replace the
+  public flasher. GitHub Actions are pinned by commit SHA; M5Unified, M5GFX and IRremote are pinned.
 - Vault files and SD backups are checked (header, size, padding) before any key derivation runs and
   before memory is allocated from their size, so an oversize or malformed file costs no attempt and
   cannot exhaust memory. The Argon2 work a file may request (memory × passes) is capped, so a crafted
