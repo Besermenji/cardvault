@@ -18,8 +18,11 @@ import hashlib
 import hmac
 import json
 import re
+import os
 import struct
+import subprocess
 import sys
+import tempfile
 import time
 import traceback
 
@@ -53,6 +56,8 @@ class Device:
         self.rx = b""  # bytes read but not yet split into lines
         self.stale = 0  # replies that arrived for an earlier request
         self.unreadable = []  # requests the device could not parse ("ERR -")
+        self.noise = []  # serial lines that are not replies (boot output, stray prints)
+        self.typed = set()  # every string sent with `type`: the secrets of this run
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -85,6 +90,8 @@ class Device:
         would hide that."""
         self.seq += 1
         rid = str(self.seq)
+        if line.startswith("type ") and len(line) > 9:
+            self.typed.add(line[5:])
         self.ser.write(f"{rid} {line}\n".encode())
         end = time.time() + timeout
         while time.time() < end:
@@ -93,7 +100,9 @@ class Device:
                 raw, self.rx = self.rx.split(b"\n", 1)
                 m = REPLY.match(raw.decode(errors="replace").strip())
                 if not m:
-                    continue  # boot output, CVTEST READY
+                    # boot output, CVTEST READY; t26 checks it for secrets
+                    self.noise.append(raw.decode(errors="replace").strip())
+                    continue
                 kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
                 if got == "-":
                     # Some line had no readable id: maybe ours, maybe an old
@@ -1352,6 +1361,96 @@ def t24_tab_cascade_and_clear_field(d):
         delete_entry(d, title)
     check(not any(e["title"] in (note_t, pw_t, totp_t) for e in d.dump()),
           "test entries left behind")
+
+
+def esptool_read(port, offset, size, out):
+    """Dump flash with esptool (it resets the device into the bootloader over
+    USB and back into the app afterwards). Needs a Python that can run it."""
+    tool = os.path.expanduser("~/.platformio/packages/tool-esptoolpy/esptool.py")
+    if not os.path.exists(tool):
+        raise Skip("esptool.py not found (PlatformIO's tool-esptoolpy)")
+    r = subprocess.run(
+        [sys.executable, tool, "--chip", "esp32s3", "--port", port, "--baud", "921600",
+         "read_flash", hex(offset), hex(size), out],
+        capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise Fail(f"esptool read_flash {hex(offset)} failed: {r.stdout[-300:]} {r.stderr[-300:]}")
+
+
+def t25_flash_holds_no_plaintext(d):
+    """Hardware checklist (#17): `esptool read_flash` of the vault partition
+    shows no plaintext. Stores unique canary secrets, reads the raw vault
+    partition and the NVS partition back over USB and looks for them, for
+    every string this run ever typed, and for the passphrases."""
+    pw = P3 if SD_CARD else P1
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+    run = int(time.time()) % 100000
+    title, body = f"CanaryTitle{run}", f"CanaryBody{run}Secret"
+    new_entry(d, "Note")
+    set_title(d, title)
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type(body)
+    d.key("tab")
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    check(find_one(d, title)["fields"]["1"] == body, "canary note not saved")
+    st = assert_vault_stored(d)
+
+    # (partition offsets and sizes: partitions_test.csv)
+    port = d.port
+    d.ser.close()
+    with tempfile.TemporaryDirectory() as tmp:
+        vault, nvs = os.path.join(tmp, "vault.bin"), os.path.join(tmp, "nvs.bin")
+        esptool_read(port, 0x410000, 0x100000, vault)
+        esptool_read(port, 0x9000, 0x5000, nvs)
+        vdata, ndata = open(vault, "rb").read(), open(nvs, "rb").read()
+    d.connect(timeout=40)
+
+    check(len(vdata) == 0x100000 and len(ndata) == 0x5000, "short flash read")
+    hits = vdata.count(b"CVLT")
+    check(hits == st["magic_hits"] and hits >= 1,
+          f"the dump must match what the device sees: {hits} vs {st['magic_hits']}")
+    # Positive control: the NVS dump does hold readable names, so a search of
+    # it can find text when there is some.
+    check(b"cvt_guard" in ndata, "NVS dump is not the device's NVS (control string missing)")
+    used = sum(1 for b in vdata if b != 0xFF)
+    check(used > 1000, f"the vault partition looks empty ({used} bytes used)")
+    needles = {pw, P1, P2, P3, TOTP_SECRET, title, body} | d.typed
+    for name, data in (("vault partition", vdata), ("NVS partition", ndata)):
+        for s in sorted(needles):
+            for variant in (s.encode(), s.upper().encode(), s.lower().encode()):
+                check(variant not in data, f"plaintext {s!r} found in the {name}")
+    # Ciphertext should look random: no long runs of printable text. Sampling
+    # 64 KiB of the data that is actually used.
+    used_bytes = bytes(b for b in vdata if b != 0xFF)
+    printable = sum(1 for b in used_bytes if 0x20 <= b < 0x7F) / len(used_bytes)
+    check(printable < 0.6, f"vault partition looks like text ({printable:.0%} printable)")
+
+    d.screen("unlock", timeout=30)  # the dump rebooted the device: locked again
+    d.unlock(pw)
+    delete_entry(d, title)
+
+
+def t26_serial_output_is_silent(d):
+    """Hardware checklist (#17): the serial monitor shows nothing sensitive.
+    Every line the device printed during this run that is not a reply to the
+    harness (boot output, stray prints, driver errors) is checked against
+    every string this run typed."""
+    needles = {P1, P2, P3, TOTP_SECRET} | d.typed
+    for line in d.noise:
+        for s in needles:
+            check(s not in line and s.lower() not in line.lower(),
+                  f"serial output contains {s!r}: {line!r}")
+    # The harness's own lines aside, the device must not chat. Boot output is
+    # allowed; a line per keypress or per unlock would show up as a flood.
+    check(len(d.noise) < 200, f"{len(d.noise)} stray serial lines: {d.noise[:5]}")
+    print(f"      ({len(d.noise)} non-reply lines checked against {len(needles)} secrets: "
+          f"{sorted(set(d.noise))[:4]})")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
