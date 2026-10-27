@@ -128,6 +128,26 @@ void storage(ui::App& a) {
     reply(j);
 }
 
+// The screen as the loop would draw it now, as ONE reply line:
+// "OK <id> <w> <h> <rows>", RGB565 as 4 hex characters per pixel, row after row.
+// tools/screenshots.py turns it into a PNG. Revealed secrets show up in it.
+void shot(ui::App& a) {
+    ui::Screen* s = a.router.top();
+    if (!s || !a.canvas) return error("no screen");
+    s->draw(*a.canvas);
+    a.draw_toast(*a.canvas);
+    Serial.print("OK ");
+    Serial.print(g_id.c_str());
+    Serial.printf(" %d %d ", ui::kW, ui::kH);
+    char hex[ui::kW * 4 + 1];
+    for (int y = 0; y < ui::kH; y++) {
+        for (int x = 0; x < ui::kW; x++)
+            snprintf(hex + x * 4, 5, "%04x", unsigned(a.canvas->readPixel(x, y)));
+        Serial.print(hex);
+    }
+    Serial.println();
+}
+
 // "<id> <command> [argument]"; the id is a decimal number chosen by the host.
 void handle(ui::App& a, const std::string& request) {
     std::string line;
@@ -157,6 +177,8 @@ void handle(ui::App& a, const std::string& request) {
         dump(a);
     } else if (cmd == "storage") {
         storage(a);
+    } else if (cmd == "shot") {
+        shot(a);
     } else if (cmd == "key") {
         ui::Key k;
         if (!key_named(arg, k)) return error("unknown key");

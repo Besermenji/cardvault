@@ -113,7 +113,7 @@ class Device:
         line after opening the port can be one (a reconnect cuts at most the
         line in flight); it counts as a fragment only if it ends like a data
         reply (JSON: } or ]). Every later line is checked by t26."""
-        self.rx += self.ser.read(256)
+        self.rx += self.ser.read(max(256, self.ser.in_waiting))
         replies = []
         while b"\n" in self.rx:
             raw, self.rx = self.rx.split(b"\n", 1)
@@ -190,6 +190,15 @@ class Device:
     def storage(self):
         """What is really stored: vault files, the raw partition, the NVS counter."""
         return json.loads(self.cmd("storage", timeout=30))
+
+    def shot(self):
+        """The screen as the device draws it now: (width, height, rows), one
+        4-hex-digit RGB565 value per pixel."""
+        w, h, hexrows = self.cmd("shot", timeout=30).split(" ")
+        w, h = int(w), int(h)
+        if len(hexrows) != w * h * 4:
+            raise Fail(f"shot: expected {w * h * 4} hex digits, got {len(hexrows)}")
+        return w, h, [hexrows[y * w * 4:(y + 1) * w * 4] for y in range(h)]
 
     def key(self, name, times=1):
         # The device handles each request in order and drains its key queue on
@@ -1564,6 +1573,17 @@ def t26_serial_output_is_silent(d):
           f"{len(d.noise)} stray serial lines for {boots} boots: {d.noise[:5]}")
     print(f"      ({len(d.noise)} device lines checked against {len(needles)} secrets, "
           f"{len(d.fragments)} reply fragments skipped: {sorted(set(d.noise))[:4]})")
+
+
+def t27_screenshot_hook(d):
+    """The `shot` command (tools/screenshots.py) returns the whole screen."""
+    go_home(d) if d.state()["screen"] != "unlock" else d.unlock(P3 if SD_CARD else P1)
+    w, h, rows = d.shot()
+    check((w, h) == (240, 135), f"unexpected size {w}x{h}")
+    colours = {row[i:i + 4] for row in rows for i in range(0, len(row), 4)}
+    check(len(colours) >= 4, f"screen looks blank: {len(colours)} colours")
+    check(len(set(rows[:18])) > 1, "header band is empty")
+    d.screen("home")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
