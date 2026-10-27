@@ -36,26 +36,36 @@ jobs:
       - name: Changelog has a section for this version
         run: tools/release_notes.sh "$GITHUB_REF_NAME" > /dev/null
 
-      - name: CI passed for this commit on main
+      - name: CI passed for this commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The push to main that merged this commit runs ci.yml; wait for it (up to ~25 min).
+          # The commit must have been built by ci.yml itself (normally the push to main that merged
+          # it): a green run for a later commit says nothing about this one. A run that exists but
+          # has not finished is waited for (up to ~25 min); a missing run is given a minute to appear.
+          missing=0
           for _ in $(seq 1 75); do
-            run=$(gh run list --workflow ci.yml --branch main --event push --commit "$GITHUB_SHA" \
-                    --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
-            echo "ci.yml on $GITHUB_SHA: ${run:-none yet}"
+            run=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --json status,conclusion \
+                    --jq 'if length == 0 then "none" else "\(.[0].status) \(.[0].conclusion)" end')
+            echo "ci.yml on $GITHUB_SHA: $run"
             case "$run" in
               "completed success") exit 0 ;;
               "completed "*) echo "CI did not succeed for this commit"; exit 1 ;;
+              none)
+                missing=$((missing + 1))
+                if [ "$missing" -ge 4 ]; then
+                  echo "ci.yml never ran for $GITHUB_SHA; tag a commit that CI built (the tip of main)"
+                  exit 1
+                fi ;;
             esac
             sleep 20
           done
-          echo "no finished CI run for this commit"; exit 1
+          echo "CI did not finish in time"; exit 1
 
   build:
     name: Build and check
-    needs: verify
+    # No needs: the build holds no write token, so it runs beside the CI wait in `verify`.
+    # `publish` needs both.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -124,7 +134,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: build
+    needs: [verify, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

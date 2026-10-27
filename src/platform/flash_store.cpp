@@ -15,11 +15,11 @@ const char* kTmp = "/vault.tmp";  // next version, verified before it replaces k
 const char* kBak = "/vault.bak";  // previous version, only while a rename fallback runs
 
 const esp_partition_t* find_partition(const char*& label) {
-    // Only ever our own "vault" partition. When installed through Launcher,
+    // Only ever our own vault partition (CV_VAULT_LABEL). When installed through Launcher,
     // Launcher creates it from the label in our partition table; we never fall
     // back to shared partitions (spiffs, littlefs, fat) that other firmware
     // may format or overwrite.
-    label = "vault";
+    label = CV_VAULT_LABEL;
     return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
 }
 
@@ -96,12 +96,6 @@ bool partition_blank(const esp_partition_t* p) {
 bool FlashStore::has_partition() {
     const char* label = nullptr;
     return find_partition(label) != nullptr;
-}
-
-uint32_t FlashStore::partition_address() {
-    const char* label = nullptr;
-    const esp_partition_t* p = find_partition(label);
-    return p ? p->address : 0;
 }
 
 bool FlashStore::begin() {

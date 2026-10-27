@@ -6,8 +6,8 @@ Press ctrl+s on the Cardputer; each dump is saved as a PNG.
   python3 tools/screenshot.py /dev/cu.usbmodem1101 [out_dir]   # live, needs pyserial
   python3 tools/screenshot.py capture.log [out_dir]            # from a saved serial log
 
-The debug build uses the test partition table (empty demo vault) and refuses to start over a release
-install. Use dummy data only: screenshots can contain revealed secrets.
+The debug build uses the test partition table (empty demo vault, its own "cvtvault" partition label), so it
+cannot open a real vault. Use dummy data only: screenshots can contain revealed secrets.
 """
 import pathlib
 import struct

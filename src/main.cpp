@@ -100,23 +100,6 @@ void setup() {
         if (legacy.begin(true)) a.guard.adopt(legacy);
     }
 #endif
-#if defined(CV_TEST_HOOKS) || defined(CV_SCREENSHOT)
-    // Hooks can erase the vault and ctrl+S can show secrets, so these builds
-    // only run on the test partition table. Nothing is mounted otherwise.
-    if (!FlashStore::on_test_partition()) {
-#ifdef CV_TEST_HOOKS
-        test::refuse(FlashStore::partition_address());
-#endif
-        a.router.reset(make_message(
-            "Test build refused",
-            "This build is for the test partition table only; it will not touch a real vault. "
-            "Flash the release image.",
-            color::bad));
-        a.router.apply();
-        a.last_input_ms = millis();
-        return;
-    }
-#endif
     bool has_partition = FlashStore::has_partition();
     bool mounted = has_partition && a.store.begin();
     switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),

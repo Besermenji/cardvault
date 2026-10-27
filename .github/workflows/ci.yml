@@ -45,6 +45,9 @@ jobs:
           echo "firmware.bin: $size bytes (budget $budget)"
           test "$size" -le "$budget"
 
+      - name: Web flasher has no external code and a strict CSP
+        run: tools/check_flasher.sh
+
       - name: Release environment is a plain build
         run: python3 tools/check_release_flags.py
 
@@ -73,8 +76,8 @@ jobs:
                 echo "check did not report '$reason' for $env_name:"; cat control.err; exit 1; }
             done
           }
-          expect_fail cardputer-debug "vault partition at 0x410000" "marker: CVSHOT"
-          expect_fail cardputer-e2e "vault partition at 0x410000" "marker: CVTEST" "marker: unknown command"
+          expect_fail cardputer-debug "no 'vault' partition" "test partition 'cvtvault'" "marker: CVSHOT" "marker: cvtvault"
+          expect_fail cardputer-e2e "no 'vault' partition" "test partition 'cvtvault'" "marker: CVTEST" "marker: unknown command"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -1,6 +1,6 @@
 // On-device integration tests: run on a real Cardputer ADV with
 //   pio test -e cardputer-test   (suite: test_device_platform)
-// They use the test partition table (vault at 0x410000) and test NVS
+// They use the test partition table (vault partition "cvtvault") and test NVS
 // namespaces, so a real vault on the device is never touched.
 #include <Arduino.h>
 
@@ -27,7 +27,13 @@
 using namespace cv;
 
 static const esp_partition_t* vault_part() {
-    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "vault");
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, CV_VAULT_LABEL);
+}
+
+// A real vault partition; never present on the test layout.
+static bool production_vault_exists() {
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "vault") !=
+           nullptr;
 }
 
 static void erase_vault_partition() {
@@ -43,10 +49,11 @@ void tearDown() {}
 // ---- Safety: make sure we are on the test layout ------------------------------
 
 void test_runs_on_test_partition_layout() {
-    const esp_partition_t* p = vault_part();
-    TEST_ASSERT_NOT_NULL(p);
-    TEST_ASSERT_EQUAL_HEX32_MESSAGE(0x410000, p->address,
-                                    "refusing to run: not the test partition table");
+    TEST_ASSERT_EQUAL_STRING("cvtvault", CV_VAULT_LABEL);
+    TEST_ASSERT_NOT_NULL(vault_part());
+    // The production partition must not exist on a test layout.
+    TEST_ASSERT_FALSE_MESSAGE(production_vault_exists(),
+                              "refusing to run: a production 'vault' partition exists");
 }
 
 // ---- FlashStore -------------------------------------------------------------
@@ -570,7 +577,7 @@ void setup() {
     M5Cardputer.begin(cfg, false);
     UNITY_BEGIN();
     RUN_TEST(test_runs_on_test_partition_layout);
-    if (vault_part() && vault_part()->address == 0x410000) {
+    if (vault_part() && !production_vault_exists()) {
         RUN_TEST(test_blank_partition_is_formatted_and_mounted);
         RUN_TEST(test_unreadable_partition_is_never_formatted);
         RUN_TEST(test_write_read_overwrite_roundtrip);

@@ -15,7 +15,6 @@ namespace {
 
 std::string g_line;
 bool g_g0 = false;
-bool g_refused = false;
 // Id of the request being answered ("-" when the line had none). Every reply
 // carries it, so the host can tell a late reply from the one it waits for.
 std::string g_id = "-";
@@ -222,14 +221,7 @@ void begin() {
     Serial.println("CVTEST READY");
 }
 
-void refuse(uint32_t vault_address) {
-    g_refused = true;
-    Serial.begin(115200);
-    Serial.printf("CVTEST REFUSED vault at 0x%x\n", unsigned(vault_address));
-}
-
 void poll(ui::App& a) {
-    if (g_refused) return;
     while (Serial.available()) {
         char c = char(Serial.read());
         if (c == '\r') continue;
