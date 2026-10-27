@@ -35,6 +35,30 @@ P3 = "backup phrase 99"
 SD_CARD = False  # set by --sd
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
+# The Cardputer keyboard matrix (column x 0-13, row y 0-3), copied from
+# M5Cardputer 1.1.1 (utility/Keyboard/Keyboard.h, _key_value_map; the version is
+# pinned in platformio.ini). Printable keys: (unshifted, shifted); the others
+# are named.
+_MATRIX = [
+    list(zip("`1234567890-=", "~!@#$%^&*()_+")) + ["bs"],
+    ["tab"] + list(zip("qwertyuiop[]\\", "QWERTYUIOP{}|")),
+    ["fn", "shift"] + list(zip("asdfghjkl;'", 'ASDFGHJKL:"')) + ["enter"],
+    ["ctrl", "opt", "alt"] + list(zip("zxcvbnm,./", "ZXCVBNM<>?")) + ["space"],
+]
+KEYPOS = {}      # key name -> (x, y); a printable key is named by its unshifted character
+SHIFTED = {}     # shifted character -> (x, y)
+PRINTABLE = []   # (name, unshifted, shifted) for every key that types a character
+for _y, _row in enumerate(_MATRIX):
+    assert len(_row) == 14, _row
+    for _x, _k in enumerate(_row):
+        if isinstance(_k, tuple):
+            KEYPOS[_k[0]] = (_x, _y)
+            SHIFTED[_k[1]] = (_x, _y)
+            PRINTABLE.append((_k[0], _k[0], _k[1]))
+        else:
+            KEYPOS[_k] = (_x, _y)
+PRINTABLE.append(("space", " ", " "))
+
 
 class Fail(Exception):
     pass
@@ -211,6 +235,21 @@ class Device:
     def type(self, text):
         self.cmd(f"type {text}")
         time.sleep(0.05)
+
+    def keys(self, *names):
+        """Hold exactly these keys (matrix positions through the library's own
+        key list, key state and keymap); no names releases everything."""
+        self.cmd("keys " + " ".join("%d,%d" % KEYPOS[n] for n in names))
+
+    def tap(self, name, *mods, hold=0.04):
+        """Press `name` together with the modifier keys, hold it for `hold`
+        seconds (short of the auto-repeat delay), release."""
+        self.keys(*mods, name)
+        time.sleep(hold)
+        self.keys(*mods)
+        time.sleep(0.02)
+        self.keys()
+        time.sleep(0.02)
 
     def wait(self, pred, what, timeout=20):
         end = time.time() + timeout
@@ -1088,12 +1127,12 @@ def t22_confirm_and_validation(d):
     d.key("tab")
     d.menu_pick("Delete")
     d.screen("confirm", "Delete secret?")
-    d.cmd("press y 1")
+    d.keys("y")
     try:
         st = d.screen("home")
         time.sleep(1.5)  # > 450 ms repeat delay
     finally:
-        d.cmd("press y 0")
+        d.keys()
     st = d.state()
     check(st["entries"] == stored, f"held Y should have deleted {memo}: {st}")
     check(info(st)["query"] == memo, f"held Y repeated into the next screen: {st}")
@@ -1603,6 +1642,141 @@ def t27_screenshot_hook(d):
     after = d.state()
     check((after["screen"], after["title"], after["depth"]) ==
           (before["screen"], before["title"], before["depth"]), f"shot changed the screen: {after}")
+
+
+def t28_keyboard_matrix(d):
+    """Keys held on the keyboard matrix (the `keys` hook) go through the
+    library's own key list, key state and keymap, then our key mapping,
+    rolls and auto-repeat. Not covered: the I2C read and the switches."""
+    pw = P3 if SD_CARD else P1  # see t22
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+    new_entry(d, "Note")
+    set_title(d, "Keys")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+
+    def length():
+        return int(info(d.state())["len"])
+
+    expect = ""
+
+    # Every printable key, unshifted and then shifted together with Shift.
+    for name, plain, _ in PRINTABLE:
+        d.tap(name)
+        expect += plain
+    for name, _, shifted in PRINTABLE:
+        d.tap(name, "shift")
+        expect += shifted
+    check(length() == len(expect), f"typed {length()} characters, expected {len(expect)}")
+
+    # Modifiers and Opt alone type nothing.
+    for name in ("fn", "shift", "ctrl", "alt", "opt"):
+        d.tap(name)
+    check(length() == len(expect), f"a modifier alone typed a character: {length()}")
+
+    # Enter and Backspace from the matrix.
+    d.tap("enter")
+    d.tap("a")
+    d.tap("b")
+    d.tap("bs")
+    expect += "\na"
+    check(length() == len(expect), f"enter/backspace: {length()} vs {len(expect)}")
+
+    # Key rolls: the next key goes down before the last one is released.
+    for roll in (("a", "b"), ("q", "w", "e")):
+        for i in range(len(roll)):
+            d.keys(*roll[:i + 1])
+            time.sleep(0.04)
+        for i in range(len(roll)):
+            d.keys(*roll[i + 1:])
+            time.sleep(0.04)
+        expect += "".join(roll)
+    d.keys()
+    check(length() == len(expect), f"rolled keys: {length()} vs {len(expect)}")
+
+    # fn + ; . , /  move the cursor (Up Down Left Right).
+    d.tap("x")
+    d.tap(",", "fn")  # Left
+    d.tap("y")
+    d.tap("/", "fn")  # Right
+    d.tap("z")
+    expect += "yxz"
+    d.tap("enter")
+    d.tap("a")
+    d.tap("b")
+    d.tap("enter")
+    d.tap("c")
+    d.tap("d")
+    d.tap(";", "fn")  # Up: end of "ab"
+    d.tap("1")
+    d.tap(".", "fn")  # Down: end of "cd"
+    d.tap("2")
+    expect += "\nab1\ncd2"
+    check(length() == len(expect), f"fn arrows: {length()} vs {len(expect)}")
+
+    # Held keys repeat after 450 ms, then every 70 ms.
+    before = length()
+    d.keys("x")
+    time.sleep(1.2)
+    d.keys()
+    time.sleep(0.2)
+    n = length() - before
+    check(9 <= n <= 14, f"held x typed {n} characters in 1.2 s, expected about 11")
+    d.key("bs", n)
+    # Enter does not repeat.
+    before = length()
+    d.keys("enter")
+    time.sleep(1.0)
+    d.keys()
+    time.sleep(0.2)
+    check(length() - before == 1, f"held enter typed {length() - before} newlines")
+    d.key("bs")
+    check(length() == len(expect), f"after repeat checks: {length()} vs {len(expect)}")
+
+    # fn + ` is Esc: asks before dropping the text; declining keeps it.
+    d.tap("`", "fn")
+    d.screen("confirm", "Discard changes?")
+    d.key("n")
+    st = d.screen("text_input", "Text")
+    check(int(info(st)["len"]) == len(expect), f"declining lost text: {st}")
+
+    # Tab finishes the editor, then the note is stored exactly as typed.
+    d.tap("tab")
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    notes = [e for e in d.dump() if e["title"] == "Keys"]
+    check(len(notes) == 1, f"note not saved: {notes}")
+    got = notes[0]["fields"]["1"]
+    check(got == expect, f"typed text differs:\n  got      {got!r}\n  expected {expect!r}")
+
+    # Hold Space to reveal (the held-key path: isKeyPressed on the real key list).
+    check(info(d.state())["held"] == "0", "space must start released")
+    d.keys("space")
+    d.wait(lambda s: info(s).get("held") == "1", "hold-to-reveal with a held matrix key")
+    d.keys()
+    d.wait(lambda s: info(s).get("held") == "0", "release hides again")
+
+    # Opt toggles reveal in a masked field, once per press, not while held.
+    new_entry(d, "Password")
+    d.key("down", 2)
+    d.key("enter")
+    st = d.screen("text_input", "Password")
+    check(info(st)["reveal"] == "0", f"masked field must start hidden: {st}")
+    d.tap("opt")
+    d.wait(lambda s: info(s)["reveal"] == "1", "opt shows")
+    d.tap("opt")
+    d.wait(lambda s: info(s)["reveal"] == "0", "opt hides")
+    d.keys("opt")
+    time.sleep(1.0)
+    d.keys()
+    d.wait(lambda s: info(s)["reveal"] == "1", "a held opt toggles once")
+    d.tap("`", "fn")  # nothing typed: closes without asking
+    d.screen("entry_edit")
+    go_home(d)
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]

@@ -5,9 +5,11 @@
 #include <M5Cardputer.h>
 
 #include <string>
+#include <vector>
 
 #include "core/flows.h"
 #include "ui/gfx.h"
+#include "ui/sim_keyboard.h"
 
 namespace cv {
 namespace test {
@@ -202,12 +204,33 @@ void handle(ui::App& a, const std::string& request) {
         bool on = sp2 != std::string::npos && arg.substr(sp2 + 1) == "1";
         ui::set_held_override(c == "space" ? ' ' : c[0], on);
         reply("");
-    } else if (cmd == "press") {
-        // press <char> <0|1>: hold/release a simulated physical key
-        auto sp2 = arg.find(' ');
-        bool on = sp2 != std::string::npos && arg.substr(sp2 + 1) == "1";
-        ui::set_sim_pressed(on && !arg.empty() ? arg[0] : 0);
-        reply("");
+    } else if (cmd == "keys") {
+        // keys [x,y ...]: the full set of simulated held keys, as keyboard
+        // matrix positions (column x 0-13, row y 0-3); no argument releases all.
+        std::vector<Point2D_t> pos;
+        size_t i = 0;
+        bool ok = true;
+        while (ok && i < arg.size()) {
+            if (arg[i] == ' ') {
+                i++;
+                continue;
+            }
+            int x = -1, y = -1, n = 0;
+            ok = sscanf(arg.c_str() + i, "%d,%d%n", &x, &y, &n) == 2 && x >= 0 && x < 14 &&
+                 y >= 0 && y < 4;
+            if (!ok) break;
+            Point2D_t p;
+            p.x = x;
+            p.y = y;
+            pos.push_back(p);
+            i += size_t(n);
+        }
+        if (!ok) {
+            error("bad key position");
+        } else {
+            ui::set_sim_keys(pos);
+            reply("");
+        }
     } else if (cmd == "g0") {
         g_g0 = true;
         reply("");

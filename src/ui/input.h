@@ -42,9 +42,6 @@ bool key_held(char c);
 // Test builds only: queue a synthetic key event / simulate a held key.
 void inject_key(const Key& k);
 void set_held_override(char c, bool held);
-// Simulates physically holding the key for `c` (0 = release): unlike
-// inject_key it goes through the press and auto-repeat path.
-void set_sim_pressed(char c);
 #endif
 
 }  // namespace ui
