@@ -8,6 +8,7 @@
 #include "platform/nvs_kv.h"
 #include "test_hooks.h"
 #include "ui/app.h"
+#include "ui/gfx.h"
 
 using namespace cv;
 using namespace cv::ui;
@@ -25,9 +26,7 @@ void dump_screenshot() {
     Serial.printf("CVSHOT %d %d\n", kW, kH);
     char hex[kW * 4 + 1];
     for (int y = 0; y < kH; y++) {
-        for (int x = 0; x < kW; x++) {
-            snprintf(hex + x * 4, 5, "%04x", unsigned(g_canvas.readPixel(x, y)));
-        }
+        row_hex(g_canvas, y, hex);
         Serial.println(hex);
     }
     Serial.println("CVEND");

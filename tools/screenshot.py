@@ -23,12 +23,16 @@ def rgb565_to_rgb(v):
     return (r * 255 // 31, g * 255 // 63, b * 255 // 31)
 
 
-def write_png(path, width, height, rows):
+def write_png(path, width, height, rows, scale=1):
+    """rows: one string of 4-hex-digit RGB565 values per pixel row. scale > 1
+    enlarges by whole pixels (nearest neighbour), no blurring."""
     raw = bytearray()
     for row in rows:
-        raw.append(0)  # filter: none
+        line = bytearray([0])  # filter: none
         for i in range(0, len(row), 4):
-            raw.extend(rgb565_to_rgb(int(row[i:i + 4], 16)))
+            line.extend(rgb565_to_rgb(int(row[i:i + 4], 16)) * scale)
+        raw.extend(bytes(line) * scale)
+    width, height = width * scale, height * scale
 
     def chunk(tag, data):
         c = struct.pack(">I", len(data)) + tag + data

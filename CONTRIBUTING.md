@@ -30,6 +30,12 @@ pio test -e native              # run host unit tests
 - `tools/merge_bin.sh <version> <out_dir> <env>` can merge other environments for flashing, but names the
   result `...-NOT-FOR-RELEASE.bin`.
 
+## Screenshots
+
+`docs/screenshots/` is generated, not drawn: when a screen's look changes, flash `cardputer-e2e` and run
+`python3 tools/screenshots.py <port> --yes` (see the README), then commit the changed PNGs. The `shot` command
+it uses lives in `src/test_hooks.cpp`, so it only exists in the e2e build.
+
 ## Rules for security-sensitive code
 
 - Release builds (`cardputer`) never write secrets, passphrases, keys or decrypted content anywhere.
