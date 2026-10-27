@@ -11,7 +11,8 @@ leave backup-*.cvb files in /cardvault on the card.
 
 The e2e firmware keeps its vault in its own "cvtvault" partition (0x410000) and
 uses separate NVS namespaces, so a real vault on the device is never touched. Requires
-pyserial (PlatformIO's Python has it).
+pyserial (PlatformIO's Python has it). t25 dumps flash with PlatformIO's esptool, run by
+this Python or PlatformIO's own (found via `pio system info`); it skips without one.
 """
 import argparse
 import hashlib
@@ -57,7 +58,8 @@ class Device:
         self.stale = 0  # replies that arrived for an earlier request
         self.unreadable = []  # requests the device could not parse ("ERR -")
         self.noise = []  # serial lines that are not replies (boot output, stray prints)
-        self.typed = set()  # every string sent with `type`: the secrets of this run
+        self.fragments = []  # tails of reply lines cut by a reconnect (harness traffic)
+        self.typed = set()  # every string of 4+ characters sent with `type`
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -68,19 +70,55 @@ class Device:
             try:
                 self.ser = serial.Serial(self.port, 115200, timeout=0.2)
                 time.sleep(0.3)
-                self.ser.reset_input_buffer()
+                # Keep what the device printed before we ask anything (boot
+                # output): t26 checks it. Replies still queued are stale.
                 self.rx = b""
+                self._drain()
                 if self.cmd("ping", timeout=2) == "pong":
                     return
             except (serial.SerialException, OSError, Fail):
                 pass
-            try:
-                if self.ser:
-                    self.ser.close()
-            except Exception:
-                pass
+            self.close()
             time.sleep(0.5)
         raise Fail(f"device on {self.port} not responding")
+
+    def close(self):
+        """Read what is left on the link (for t26), then close it."""
+        try:
+            if self.ser:
+                self._drain()
+        except (serial.SerialException, OSError):
+            pass  # the link is already gone (reboot)
+        try:
+            if self.ser:
+                self.ser.close()
+        except Exception:
+            pass
+
+    def _drain(self, limit=2.0):
+        """Read until nothing more arrives (at most `limit` seconds)."""
+        end = time.time() + limit
+        while self.ser.in_waiting and time.time() < end:
+            self._pump()
+
+    def _pump(self):
+        """Read what has arrived and return the complete reply lines. Other
+        lines are device output (`noise`), except the tail of a reply line whose
+        start was lost, which is harness traffic (`fragments`): data replies
+        are JSON and end in } or ], and the firmware prints no JSON itself."""
+        self.rx += self.ser.read(256)
+        replies = []
+        while b"\n" in self.rx:
+            raw, self.rx = self.rx.split(b"\n", 1)
+            text = raw.decode(errors="replace").strip()
+            m = REPLY.match(text)
+            if m:
+                replies.append(m)
+            elif text.endswith(("}", "]")):
+                self.fragments.append(text)
+            elif text:
+                self.noise.append(text)  # boot output, CVTEST READY
+        return replies
 
     def cmd(self, line, timeout=10):
         """Send `line` with a fresh request id and return the payload of the
@@ -90,19 +128,12 @@ class Device:
         would hide that."""
         self.seq += 1
         rid = str(self.seq)
-        if line.startswith("type ") and len(line) > 9:
-            self.typed.add(line[5:])
+        if line.startswith("type ") and len(line) >= 9:
+            self.typed.add(line[5:])  # shorter strings would match by chance
         self.ser.write(f"{rid} {line}\n".encode())
         end = time.time() + timeout
         while time.time() < end:
-            self.rx += self.ser.read(256)
-            while b"\n" in self.rx:
-                raw, self.rx = self.rx.split(b"\n", 1)
-                m = REPLY.match(raw.decode(errors="replace").strip())
-                if not m:
-                    # boot output, CVTEST READY; t26 checks it for secrets
-                    self.noise.append(raw.decode(errors="replace").strip())
-                    continue
+            for m in self._pump():
                 kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
                 if got == "-":
                     # Some line had no readable id: maybe ours, maybe an old
@@ -126,10 +157,7 @@ class Device:
         except (serial.SerialException, OSError):
             pass  # the link went away with the reboot
         time.sleep(1.5)
-        try:
-            self.ser.close()
-        except Exception:
-            pass
+        self.close()
         self.connect()
 
     def hard_reset(self):
@@ -139,10 +167,7 @@ class Device:
         time.sleep(0.1)
         self.ser.rts = False
         time.sleep(1.5)
-        try:
-            self.ser.close()
-        except Exception:
-            pass
+        self.close()
         self.connect()
 
     # -- helpers -----------------------------------------------------------------
@@ -198,7 +223,10 @@ class Device:
         self.key("enter")
 
     def unlock(self, pw):
-        self.screen("unlock")
+        st = self.screen("unlock")
+        if st["dimmed"]:  # idle: the first key only wakes the screen
+            self.key("esc")
+            self.wait(lambda s: not s["dimmed"], "screen awake")
         self.type(pw)
         self.key("enter")
         return self.screen("home", timeout=30)
@@ -657,10 +685,7 @@ def t16_ten_wrong_passphrases_wipe(d):
             check(info(st)["len"] == "0", "keys must be ignored during the delay")
     # The 10th failure erases the vault and reboots.
     time.sleep(3)
-    try:
-        d.ser.close()
-    except Exception:
-        pass
+    d.close()
     d.connect(timeout=40)
     st = d.screen("setup", timeout=30)
     check(st["fails"] == 0, f"counter must be cleared after the wipe: {st}")
@@ -1363,25 +1388,73 @@ def t24_tab_cascade_and_clear_field(d):
           "test entries left behind")
 
 
-def esptool_read(port, offset, size, out):
-    """Dump flash with esptool (it resets the device into the bootloader over
-    USB and back into the app afterwards). Needs a Python that can run it."""
-    tool = os.path.expanduser("~/.platformio/packages/tool-esptoolpy/esptool.py")
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def test_partition(label):
+    """(offset, size) of a partition in the test builds' table."""
+    with open(os.path.join(REPO, "partitions_test.csv")) as f:
+        for line in f:
+            cols = [c.strip() for c in line.split("#", 1)[0].split(",")]
+            if cols[0] == label:
+                return int(cols[3], 0), int(cols[4], 0)
+    raise Fail(f"no {label!r} partition in partitions_test.csv")
+
+
+def find_esptool():
+    """The command that runs PlatformIO's esptool: this Python if it has
+    esptool's dependencies, else PlatformIO's own. Skips when neither works."""
+    core = os.environ.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio"))
+    pythons = [sys.executable]
+    try:
+        r = subprocess.run(["pio", "system", "info", "--json-output"],
+                           capture_output=True, text=True, timeout=60)
+        info_ = json.loads(r.stdout)  # {"core_dir": {"title": ..., "value": ...}, ...}
+        core = info_["core_dir"]["value"]
+        pythons.append(info_["python_exe"]["value"])
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired):
+        pass  # no pio on PATH: try this Python only
+    tool = os.path.join(core, "packages", "tool-esptoolpy", "esptool.py")
     if not os.path.exists(tool):
-        raise Skip("esptool.py not found (PlatformIO's tool-esptoolpy)")
-    r = subprocess.run(
-        [sys.executable, tool, "--chip", "esp32s3", "--port", port, "--baud", "921600",
-         "read_flash", hex(offset), hex(size), out],
-        capture_output=True, text=True, timeout=180)
+        raise Skip(f"esptool.py not found at {tool}")
+    for py in pythons:
+        try:
+            r = subprocess.run([py, tool, "version"], capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if r.returncode == 0:
+            return [py, tool]
+    raise Skip(f"no Python here can run {tool} (missing dependencies)")
+
+
+def esptool_read(esptool, port, offset, size, out):
+    """Dump flash. esptool resets the device into the bootloader over USB and
+    back into the app afterwards."""
+    try:
+        r = subprocess.run(
+            esptool + ["--chip", "esp32s3", "--port", port, "--baud", "921600",
+                       "read_flash", hex(offset), hex(size), out],
+            capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        raise Fail(f"esptool read_flash {hex(offset)} timed out")
     if r.returncode != 0:
         raise Fail(f"esptool read_flash {hex(offset)} failed: {r.stdout[-300:]} {r.stderr[-300:]}")
 
 
+def secrets(d):
+    """Everything that must never show up in flash or on the serial port: the
+    passphrases, the TOTP secret and every string of 4+ characters this run
+    typed (shorter ones would match by chance)."""
+    return {P1, P2, P3, TOTP_SECRET} | d.typed
+
+
 def t25_flash_holds_no_plaintext(d):
     """Hardware checklist (#17): `esptool read_flash` of the vault partition
-    shows no plaintext. Stores unique canary secrets, reads the raw vault
-    partition and the NVS partition back over USB and looks for them, for
-    every string this run ever typed, and for the passphrases."""
+    shows no plaintext. Stores a canary note, dumps the raw vault partition
+    and the NVS partition over USB and searches them for every secret."""
+    esptool = find_esptool()  # before touching the vault: a Skip leaves nothing behind
+    vault_at, vault_size = test_partition("cvtvault")
+    nvs_at, nvs_size = test_partition("nvs")
     pw = P3 if SD_CARD else P1
     if d.state()["screen"] == "unlock":
         d.unlock(pw)
@@ -1398,59 +1471,85 @@ def t25_flash_holds_no_plaintext(d):
     d.screen("entry_edit")
     save_entry(d)
     d.screen("entry_view")
-    check(find_one(d, title)["fields"]["1"] == body, "canary note not saved")
-    st = assert_vault_stored(d)
 
-    # (partition offsets and sizes: partitions_test.csv)
-    port = d.port
-    d.ser.close()
-    with tempfile.TemporaryDirectory() as tmp:
-        vault, nvs = os.path.join(tmp, "vault.bin"), os.path.join(tmp, "nvs.bin")
-        esptool_read(port, 0x410000, 0x100000, vault)
-        esptool_read(port, 0x9000, 0x5000, nvs)
-        vdata, ndata = open(vault, "rb").read(), open(nvs, "rb").read()
-    d.connect(timeout=40)
+    passed = False
+    try:
+        check(find_one(d, title)["fields"]["1"] == body, "canary note not saved")
+        st = assert_vault_stored(d)
+        d.close()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                vault, nvs = os.path.join(tmp, "vault.bin"), os.path.join(tmp, "nvs.bin")
+                esptool_read(esptool, d.port, vault_at, vault_size, vault)
+                esptool_read(esptool, d.port, nvs_at, nvs_size, nvs)
+                with open(vault, "rb") as f:
+                    vdata = f.read()
+                with open(nvs, "rb") as f:
+                    ndata = f.read()
+        finally:
+            d.connect(timeout=40)
 
-    check(len(vdata) == 0x100000 and len(ndata) == 0x5000, "short flash read")
-    hits = vdata.count(b"CVLT")
-    check(hits == st["magic_hits"] and hits >= 1,
-          f"the dump must match what the device sees: {hits} vs {st['magic_hits']}")
-    # Positive control: the NVS dump does hold readable names, so a search of
-    # it can find text when there is some.
-    check(b"cvt_guard" in ndata, "NVS dump is not the device's NVS (control string missing)")
-    used = sum(1 for b in vdata if b != 0xFF)
-    check(used > 1000, f"the vault partition looks empty ({used} bytes used)")
-    needles = {pw, P1, P2, P3, TOTP_SECRET, title, body} | d.typed
-    for name, data in (("vault partition", vdata), ("NVS partition", ndata)):
-        for s in sorted(needles):
-            for variant in (s.encode(), s.upper().encode(), s.lower().encode()):
-                check(variant not in data, f"plaintext {s!r} found in the {name}")
-    # Ciphertext should look random: no long runs of printable text. Sampling
-    # 64 KiB of the data that is actually used.
-    used_bytes = bytes(b for b in vdata if b != 0xFF)
-    printable = sum(1 for b in used_bytes if 0x20 <= b < 0x7F) / len(used_bytes)
-    check(printable < 0.6, f"vault partition looks like text ({printable:.0%} printable)")
-
-    d.screen("unlock", timeout=30)  # the dump rebooted the device: locked again
-    d.unlock(pw)
-    delete_entry(d, title)
+        check(len(vdata) == vault_size and len(ndata) == nvs_size, "short flash read")
+        hits = vdata.count(b"CVLT")
+        check(hits == st["magic_hits"] and hits >= 1,
+              f"the dump must match what the device sees: {hits} vs {st['magic_hits']}")
+        # Positive control: the NVS dump holds readable names, so the search
+        # below does find text when there is some.
+        check(b"cvt_guard" in ndata, "NVS dump is not the device's NVS (control string missing)")
+        used = vdata.translate(None, b"\xff")
+        check(len(used) > 1000, f"the vault partition looks empty ({len(used)} bytes used)")
+        for name, data in (("vault partition", vdata), ("NVS partition", ndata)):
+            folded = data.lower()
+            for s in sorted(secrets(d)):
+                check(s.lower().encode() not in folded, f"plaintext {s!r} found in the {name}")
+        # Beyond known strings: ciphertext has no long printable runs (random
+        # bytes give one of 24+ about once in 20,000 MiB). The names LittleFS
+        # keeps in clear ("littlefs", the vault file names) are shorter.
+        runs = {m.group() for m in re.finditer(rb"[\x20-\x7e]{24,}", vdata)}
+        check(not runs, f"readable text in the vault partition: {sorted(runs)[:5]}")
+        passed = True
+    finally:
+        # Leave the vault as this scenario found it. A cleanup failure only
+        # fails the scenario when nothing else did (and must not hide that).
+        try:
+            if d.state()["screen"] == "unlock":  # the dump rebooted the device
+                d.unlock(pw)
+            delete_entry(d, title)
+        except Exception as e:
+            if passed:
+                raise
+            print(f"      (cleanup failed too: {e})")
 
 
 def t26_serial_output_is_silent(d):
     """Hardware checklist (#17): the serial monitor shows nothing sensitive.
-    Every line the device printed during this run that is not a reply to the
+    Every line the device printed in this run that is not a reply to the
     harness (boot output, stray prints, driver errors) is checked against
-    every string this run typed."""
-    needles = {P1, P2, P3, TOTP_SECRET} | d.typed
+    every secret. Reboots and unlocks itself, so it also has something to
+    check when run alone (-k t26). Output from before the host reopens the
+    port after a reset is lost on native USB and cannot be checked."""
+    pw = P3 if SD_CARD else P1
+    before = len(d.noise)
+    d.restart_cmd("reboot")
+    d.unlock(pw)
+    d.lock()
+    d.unlock(pw)
+    time.sleep(1)
+    d.cmd("ping")  # read what arrived meanwhile
+    check(any(l == "CVTEST READY" for l in d.noise[before:]),
+          f"boot output after the reboot was not captured: {d.noise[before:]}")
+    needles = secrets(d)
     for line in d.noise:
+        folded = line.lower()
         for s in needles:
-            check(s not in line and s.lower() not in line.lower(),
-                  f"serial output contains {s!r}: {line!r}")
-    # The harness's own lines aside, the device must not chat. Boot output is
-    # allowed; a line per keypress or per unlock would show up as a flood.
-    check(len(d.noise) < 200, f"{len(d.noise)} stray serial lines: {d.noise[:5]}")
-    print(f"      ({len(d.noise)} non-reply lines checked against {len(needles)} secrets: "
-          f"{sorted(set(d.noise))[:4]})")
+            check(s.lower() not in folded, f"serial output contains {s!r}: {line!r}")
+    # The device must not chat: boot output (about 8 lines a boot) is fine, a
+    # line per key or per unlock would show up as a flood.
+    boots = max(1, d.noise.count("CVTEST READY"))
+    check(len(d.noise) <= 20 * boots,
+          f"{len(d.noise)} stray serial lines for {boots} boots: {d.noise[:5]}")
+    print(f"      ({len(d.noise)} device lines checked against {len(needles)} secrets, "
+          f"{len(d.fragments)} reply fragments skipped: {sorted(set(d.noise))[:4]})")
 
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
