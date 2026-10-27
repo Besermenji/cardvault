@@ -128,8 +128,9 @@ components:
 The source of truth is [`src/ui/theme.h`](src/ui/theme.h) (colours, fonts) and
 [`src/ui/layout.h`](src/ui/layout.h) (geometry, glyph sizes). Drawing helpers live in
 [`src/ui/gfx.cpp`](src/ui/gfx.cpp). This file describes them for people and agents who add screens;
-change it in the same commit as those files. `tools/check_design_sync.py` compares the colours and the
-screen geometry with the headers and CI fails when they drift apart.
+change it in the same commit as those files. `tools/lint_design.sh` (run in CI) fails when the colours,
+the font names, the screen geometry (`kW`, `kH`, `kHeaderH`, `kFooterH`, `kBodyY`, `kBodyH`) or the glyph cells
+here differ from the headers. Component sizes, radii and row heights are kept by hand.
 
 ## Overview
 
@@ -144,22 +145,22 @@ and never appear in a toast, a title or a hint.
 ## Colors
 
 The device draws RGB565, so each channel is quantised (5/6/5 bits) and the colours on the panel differ
-slightly from the hex values here; the values are the ones passed to `rgb()` in `theme.h`. Use the names
+slightly from the hex values in the front matter, which are the ones passed to `rgb()` in `theme.h`. Use the names
 in `cv::ui::color`, never a raw literal.
 
-- **bg** (`#0B0E14`): the screen background.
-- **panel** (`#181D28`): header, footer, dialogs, the search bar.
-- **sel** (`#26304A`): the selected list row.
-- **line** (`#303848`): thin rules, scrollbar track, progress track.
-- **text** (`#E6E9EF`): primary text and values.
-- **dim** (`#7A8499`): hints, labels, masks, the clock, secondary text.
-- **accent** / **primary** (`#F7931A`): the header underline, selection bar, focus, secret entries
+- **bg**: the screen background.
+- **panel**: header, footer, dialogs, the search bar.
+- **sel**: the selected list row.
+- **line**: thin rules, scrollbar track, progress track.
+- **text**: primary text and values.
+- **dim**: hints, labels, masks, the clock, secondary text.
+- **accent** / **primary**: the header underline, selection bar, focus, secret entries
   (type `S`). `primary` is the same colour under the name the design spec expects.
-- **good** (`#3FB950`): success, a full battery, 2FA entries (type `2`).
-- **bad** (`#F85149`): errors, a low battery (< 20 %), wrong passphrase.
-- **warn** (`#D29922`): destructive or limiting situations, battery < 50 %, a vault that is nearly full.
-- **info** (`#58A6FF`): password entries (type `P`).
-- **purple** (`#BC8CFF`): note entries (type `N`).
+- **good**: success, a full battery, 2FA entries (type `2`).
+- **bad**: errors, a low battery (< 20 %), wrong passphrase.
+- **warn**: destructive or limiting situations, battery < 50 %, a vault that is nearly full.
+- **info**: password entries (type `P`).
+- **purple**: note entries (type `N`).
 
 Contrast on the RGB565 values, computed from the WCAG formula: `text` on `bg`, `panel` and `sel` is at least
 11:1 and every state colour on `bg` or `panel` is at least 5.2:1. `dim` is 5.4:1 on `bg` and 4.6:1 on `panel`,
@@ -190,8 +191,10 @@ The grid is 240x135 pixels (`kW`, `kH`).
 - Footer: the bottom 11 px (`kFooterH`), key hints in `small` on `panel`, starting 4 px from the left.
 - Body: from y = 20 (`kBodyY`) for 103 px (`kBodyH`), 8 px side margins for content. The scrollbar takes
   the right 4 px.
-- Row heights: 18 px for the vault list, 21 px for the editor, 24 px for the entry view; the number of
-  visible rows is `body height / row height`.
+- Row heights depend on what a row shows: 15 px in Settings, 17 px in menus, 18 px in the vault list,
+  21 px in the editor, 24 px in the entry view, 26 px for 2FA codes. A list fills the body from its first row
+  down: visible rows = `(kBodyY + kBodyH - first_row_y) / row_h`, so a list under a search bar or other header
+  line gets fewer rows than `kBodyH / row_h`.
 - Columns: 30 `mono` or 40 `small` characters; the generator box (8 px margins) fits 28 `mono` or 37 `small`.
 
 Anything wider than the screen wraps (`ui/textwrap.h`) or scrolls; it is never clipped silently.
@@ -223,8 +226,9 @@ progress bar is a pill (radius = half its height). Bars (header, footer) are squ
 - **Dialog** (`dialog`): a centred rounded box on `panel` with the title in `title` and a wrapped `small`
   message in `text`; the border and title use the accent that fits the situation (`warn` to confirm,
   `bad` for errors).
-- **Toast** (`App::toast`): a short pill above the footer, text in `bg` on the state colour: `good` for
-  saved, `warn` for deleted, refused or limits, `bad` for errors. One short line, no secret in it.
+- **Toast** (`App::toast`): a 16 px box with 4 px corners, centred 4 px above the footer, text in `bg` on
+  the state colour: `good` for saved, `warn` for deleted, refused or limits, `bad` for errors. One short
+  line, no secret in it.
 - **Masked secret** (`mask`): `dim` dots of 2 px radius, one per character, in place of the value. Holding
   SPACE peeks, R reveals everything, ENTER on a row reveals just that row; a revealed secret hides again
   after 20 s or when the screen dims.
