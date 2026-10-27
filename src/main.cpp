@@ -94,14 +94,15 @@ void setup() {
     g_canvas.pushSprite(0, 0);
 
     bool guard_ok = a.guard_kv.begin();
-#ifdef CV_NVS_GUARD_LEGACY
-    if (guard_ok) {
-        NvsKv legacy(CV_NVS_GUARD_LEGACY);
-        if (legacy.begin(true)) a.guard.adopt(legacy);
-    }
-#endif
     bool has_partition = FlashStore::has_partition();
     bool mounted = has_partition && a.store.begin();
+#ifdef CV_NVS_GUARD_LEGACY
+    // Only an upgrade from rc1 (a vault is already there) has a counter to carry over.
+    if (guard_ok) {
+        NvsKv legacy(CV_NVS_GUARD_LEGACY);
+        if (legacy.begin(true)) a.guard.adopt(legacy, mounted && a.store.exists());
+    }
+#endif
     switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),
                        mounted && a.store.exists())) {
         case BootRoute::NoPartition:

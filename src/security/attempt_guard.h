@@ -49,8 +49,10 @@ public:
     bool reset();
     // Copies the counter from `legacy` (a store used by an older release)
     // when this one has none, so upgrading does not hit the missing-counter
-    // penalty. Returns true if a value was adopted.
-    bool adopt(KvStore& legacy);
+    // penalty. Only when a vault exists: a fresh install has nothing to
+    // upgrade, and the legacy namespace has a generic name that other
+    // firmware may also use. Returns true if a value was adopted.
+    bool adopt(KvStore& legacy, bool vault_exists);
 
 private:
     bool read(uint32_t& out);

@@ -48,7 +48,8 @@ bool AttemptGuard::mark_exhausted() { return kv_.set_u32(kKey, kMaxAttempts); }
 
 bool AttemptGuard::reset() { return kv_.set_u32(kKey, 0); }
 
-bool AttemptGuard::adopt(KvStore& legacy) {
+bool AttemptGuard::adopt(KvStore& legacy, bool vault_exists) {
+    if (!vault_exists) return false;
     uint32_t mine, old;
     if (kv_.get_u32(kKey, mine) != KvRead::Missing) return false;
     if (legacy.get_u32(kKey, old) != KvRead::Ok) return false;

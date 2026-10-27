@@ -60,18 +60,21 @@ void test_adopts_legacy_counter_only_when_missing() {
     legacy.values["fails"] = 3;
     MemoryKv kv;
     AttemptGuard g(kv);
-    TEST_ASSERT_TRUE(g.adopt(legacy));
+    // A fresh install (no vault) adopts nothing from the generic legacy namespace.
+    TEST_ASSERT_FALSE(g.adopt(legacy, false));
+    TEST_ASSERT_EQUAL(kFailuresIfMissing, g.failures());
+    TEST_ASSERT_TRUE(g.adopt(legacy, true));
     TEST_ASSERT_EQUAL(3, g.failures());
     // An existing counter always wins.
     legacy.values["fails"] = 0;
-    TEST_ASSERT_FALSE(g.adopt(legacy));
+    TEST_ASSERT_FALSE(g.adopt(legacy, true));
     TEST_ASSERT_EQUAL(3, g.failures());
     // Nothing to adopt, or our own counter unreadable: no write.
     MemoryKv empty, kv2;
     AttemptGuard g2(kv2);
-    TEST_ASSERT_FALSE(g2.adopt(empty));
+    TEST_ASSERT_FALSE(g2.adopt(empty, true));
     kv2.fail_reads = true;
-    TEST_ASSERT_FALSE(g2.adopt(legacy));
+    TEST_ASSERT_FALSE(g2.adopt(legacy, true));
     kv2.fail_reads = false;
     TEST_ASSERT_EQUAL(0, kv2.values.count("fails"));
 }
