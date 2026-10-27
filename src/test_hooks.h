@@ -11,6 +11,9 @@ namespace cv {
 namespace test {
 
 void begin();
+// Called instead of begin() when the vault is not on the test partition:
+// announces the refusal on serial and turns every command into a no-op.
+void refuse(uint32_t vault_address);
 // Processes pending serial commands. Called once per main-loop iteration.
 void poll(ui::App& a);
 // True once after a simulated G0 press.

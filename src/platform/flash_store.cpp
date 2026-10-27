@@ -98,6 +98,12 @@ bool FlashStore::has_partition() {
     return find_partition(label) != nullptr;
 }
 
+uint32_t FlashStore::partition_address() {
+    const char* label = nullptr;
+    const esp_partition_t* p = find_partition(label);
+    return p ? p->address : 0;
+}
+
 bool FlashStore::begin() {
     const esp_partition_t* p = find_partition(label_);
     if (!p) return false;

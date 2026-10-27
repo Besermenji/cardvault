@@ -3,9 +3,14 @@
 // has_partition() tells the two apart.
 #pragma once
 
+#include <cstdint>
+
 #include "vault/storage.h"
 
 namespace cv {
+
+// Vault address in partitions_test.csv (production: 0x310000, partitions.csv).
+constexpr uint32_t kTestVaultAddress = 0x410000;
 
 class FlashStore : public BlobStore {
 public:
@@ -24,6 +29,12 @@ public:
     bool erase() override;
     bool mounted() const { return mounted_; }
     static bool has_partition();
+    // Flash address of the "vault" partition, 0 if there is none.
+    static uint32_t partition_address();
+    // True when the vault sits where partitions_test.csv puts it. Test and
+    // debug builds (hooks, screenshots) refuse to run anywhere else, so they
+    // can never reach a real vault.
+    static bool on_test_partition() { return partition_address() == kTestVaultAddress; }
 
 #ifdef CV_TEST_HOOKS
     // Test builds only (e2e `storage` hook): which vault files exist, and how
