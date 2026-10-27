@@ -1779,6 +1779,164 @@ def t28_keyboard_matrix(d):
     go_home(d)
 
 
+SD_FAIL_TITLES = ("Restore", "Backup failed", "SD card not readable")
+
+
+def wait_message(d, titles, timeout=60):
+    """Wait for a message screen with one of `titles` while the device may be
+    stuck in a long SD call (state requests then go unanswered for a while).
+    Returns (state, seconds waited)."""
+    t0 = time.time()
+    last = None
+    while time.time() - t0 < timeout:
+        try:
+            last = d.state()
+        except Fail:
+            continue  # busy inside the SD driver; its answer comes later
+        if last["screen"] == "message" and last["title"] in titles:
+            return last, time.time() - t0
+        time.sleep(0.2)
+    raise Fail(f"no {titles} message within {timeout} s; last state: {last}")
+
+
+def restore_menu_names(d):
+    """Open Settings > Restore from SD and return the backup names, newest first."""
+    open_setting(d, ROW_RESTORE)
+    st = d.screen("menu", "Choose backup", timeout=15)
+    return info(st)["items"].split("|")
+
+
+def t29_sd_pulled(d):
+    """Pulling the card during a backup or restore ends in an error message,
+    never a freeze, and G0 locks afterwards. The pull is simulated by holding
+    the SPI MISO input high (`sdcut`): the real SD driver and FAT code fail
+    the way they do with no card. G0 is not serviced while the main loop is
+    inside a blocking SD call, so it is pressed once the message is up."""
+    need_card()
+    pw = P3
+
+    def g0_locks():
+        d.cmd("g0")
+        d.screen("unlock")
+        d.unlock(pw)
+
+    def finish_failed(titles):
+        """After a pull: the message is shown, the vault is untouched, G0 locks."""
+        st, waited = wait_message(d, titles)
+        d.cmd("sdcut off")
+        check(d.cmd("ping") == "pong", "device does not answer after the pull")
+        check(st["fails"] == 0, f"a pulled card must not count an attempt: {st}")
+        d.key("enter")
+        g0_locks()
+        return waited
+
+    d.cmd("sdcut off")
+    try:
+        if d.state()["screen"] == "unlock":
+            d.unlock(pw)
+        before = d.dump()
+        known = set(restore_menu_names(d))  # backups already on the card
+        go_home(d)
+
+        # Restore: card pulled with the list on screen, before a file is read.
+        names = restore_menu_names(d)
+        d.cmd("sdcut on")
+        d.key("enter")
+        finish_failed(("Restore", "SD card not readable"))
+
+        # Backup: card pulled while the passphrase is asked for.
+        open_setting(d, ROW_BACKUP)
+        d.screen("text_input", "Backup passphrase", timeout=15)
+        d.cmd("sdcut on")
+        d.type(P3)
+        d.key("enter")
+        d.screen("text_input", "Confirm passphrase")
+        d.type(P3)
+        d.key("enter")
+        finish_failed(("Backup failed", "SD card not readable"))
+
+        # Backup: card pulled N ms into the write (lands in the listing, the
+        # file write or the read-back check, depending on N).
+        outcomes = {}
+        for ms in (0, 1, 2, 5, 10, 20, 50, 100):
+            open_setting(d, ROW_BACKUP)
+            d.screen("text_input", "Backup passphrase", timeout=15)
+            d.cmd(f"sdcut {ms}")
+            d.type(P3)
+            d.key("enter")
+            d.screen("text_input", "Confirm passphrase")
+            d.type(P3)
+            d.key("enter")
+            st, waited = wait_message(d, ("Backup saved",) + SD_FAIL_TITLES)
+            outcomes[ms] = (st["title"], round(waited, 1))
+            check(waited < 40, f"cut after {ms} ms: {waited:.0f} s to report: {st}")
+            d.cmd("sdcut off")
+            check(st["fails"] == 0, f"cut after {ms} ms counted an attempt: {st}")
+            d.key("enter")
+            g0_locks()
+        print(f"  cut after N ms -> (message, seconds): {outcomes}", flush=True)
+        check(any(t != "Backup saved" for t, _ in outcomes.values()),
+              f"no cut ever made a backup fail: {outcomes}")
+
+        # Whatever the cuts left on the card: a file that is not a complete
+        # backup is refused, and nothing replaces the vault.
+        d.cmd("sdcut off")
+        names = restore_menu_names(d)
+        left = [n for n in names if n not in known]
+        go_home(d)
+        for name in left:
+            names = restore_menu_names(d)
+            d.key("down", names.index(name))
+            d.key("enter")
+            st = d.state()
+            if st["screen"] == "message":  # unreadable: refused before the prompt
+                check(st["title"] in SD_FAIL_TITLES, f"{name}: {st}")
+                d.key("enter")
+                continue
+            d.screen("text_input", "Backup passphrase")
+            d.type(P3)
+            d.key("enter")
+            st = d.wait(lambda s: s["screen"] in ("confirm", "message"), f"result for {name}", 30)
+            if st["screen"] == "confirm":
+                check(st["title"] == "Replace vault?", f"{name}: {st}")
+                d.key("n")  # a complete backup: fine, keep the vault
+            else:
+                check(st["title"] == "Restore failed", f"{name}: {st}")
+                d.key("enter")
+            check(st["fails"] == 0, f"{name}: restore guess counted: {st}")
+        go_home(d)
+        check(d.dump() == before, "a pulled card changed the vault")
+
+        # And the card still works: backup, change the vault, restore it.
+        open_setting(d, ROW_BACKUP)
+        d.screen("text_input", "Backup passphrase", timeout=15)
+        d.type(P3)
+        d.key("enter")
+        d.screen("text_input", "Confirm passphrase")
+        d.type(P3)
+        d.key("enter")
+        st = d.screen("message", "Backup saved", timeout=60)
+        good = backup_name_in(st)
+        d.key("enter")
+        names = restore_menu_names(d)
+        check(names[0] == good, f"newest backup not first: {names}")
+        d.key("enter")
+        d.screen("text_input", "Backup passphrase")
+        d.type(P3)
+        d.key("enter")
+        d.screen("confirm", "Replace vault?", timeout=30)
+        d.key("y")
+        d.screen("confirm", "Restored", timeout=30)
+        d.key("n")
+        d.screen("home")
+        check(d.dump() == before, "restore after the pulls did not bring back the vault")
+    finally:
+        try:
+            d.cmd("sdcut off")
+        except Fail:
+            pass
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 

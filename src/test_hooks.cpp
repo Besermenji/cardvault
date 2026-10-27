@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/flows.h"
+#include "platform/sd_backup.h"
 #include "ui/gfx.h"
 #include "ui/sim_keyboard.h"
 
@@ -231,6 +232,21 @@ void handle(ui::App& a, const std::string& request) {
             ui::set_sim_keys(pos);
             reply("");
         }
+    } else if (cmd == "sdcut") {
+        // sdcut on|off|<ms>: simulate pulling the SD card now, putting it back,
+        // or pulling it <ms> after the next backup write/read starts.
+        if (arg == "on") {
+            sd::test_cut_miso(true);
+        } else if (arg == "off") {
+            sd::test_cut_after_ms(-1);
+            sd::test_cut_miso(false);
+        } else if (!arg.empty() && arg.find_first_not_of("0123456789") == std::string::npos) {
+            sd::test_cut_after_ms(int32_t(atol(arg.c_str())));
+        } else {
+            error("sdcut on|off|<ms>");
+            return;
+        }
+        reply("");
     } else if (cmd == "g0") {
         g_g0 = true;
         reply("");

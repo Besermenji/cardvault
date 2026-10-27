@@ -8,6 +8,13 @@
 #include <algorithm>
 #include <atomic>
 
+#ifdef CV_TEST_HOOKS
+#include <esp_rom_gpio.h>
+#include <esp_timer.h>
+#include <soc/gpio_pins.h>
+#include <soc/gpio_sig_map.h>
+#endif
+
 #include "core/backup_names.h"
 #include "vault/format.h"
 
@@ -41,7 +48,45 @@ void mount_task(void*) {
     }
     vTaskDelete(nullptr);
 }
+
+#ifdef CV_TEST_HOOKS
+std::atomic<int32_t> g_cut_after_ms{-1};
+esp_timer_handle_t g_cut_timer = nullptr;
+
+void cut_timer_cb(void*) { test_cut_miso(true); }
+
+// Called as a backup write or read starts.
+void arm_cut() {
+    int32_t ms = g_cut_after_ms.exchange(-1);
+    if (ms < 0) return;
+    if (ms == 0) {
+        test_cut_miso(true);
+        return;
+    }
+    if (!g_cut_timer) {
+        esp_timer_create_args_t args = {};
+        args.callback = cut_timer_cb;
+        args.name = "sd_cut";
+        if (esp_timer_create(&args, &g_cut_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(g_cut_timer);
+    esp_timer_start_once(g_cut_timer, uint64_t(ms) * 1000);
+}
+#else
+inline void arm_cut() {}
+#endif
 }  // namespace
+
+#ifdef CV_TEST_HOOKS
+void test_cut_miso(bool cut) {
+    esp_rom_gpio_connect_in_signal(cut ? GPIO_MATRIX_CONST_ONE_INPUT : uint32_t(kMiso), FSPIQ_IN_IDX,
+                                   false);
+}
+void test_cut_after_ms(int32_t ms) {
+    if (g_cut_timer) esp_timer_stop(g_cut_timer);
+    g_cut_after_ms = ms;
+}
+#endif
 
 bool wedged() { return g_job == kAbandoned; }
 
@@ -99,6 +144,7 @@ std::vector<std::string> list_backups() {
 bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
     if (image.empty() || image.size() > kMaxFileSize) return false;
     if (!mount()) return false;
+    arm_cut();
     long number = next_backup_number(list_backups());
     if (number < 0) return false;
     // Never reuse a name that exists (even one list_backups did not show): a
@@ -123,6 +169,7 @@ bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
 
 bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
     if (!mount()) return false;
+    arm_cut();
     std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_READ);
     if (!f) return false;
