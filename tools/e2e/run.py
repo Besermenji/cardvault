@@ -1273,7 +1273,8 @@ def t24_tab_cascade_and_clear_field(d):
     d.key("enter")
     d.screen("text_input", "Text")
     d.type("tab test")
-    d.key("enter")
+    d.key("tab")  # multi-line: Enter is a newline, TAB is done
+    d.screen("entry_edit")
     save_entry(d)
     d.screen("entry_view")
     storm("the entry viewer")
