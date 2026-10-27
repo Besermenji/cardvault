@@ -16,13 +16,13 @@ Scope: everything under `src/`, the on-disk format and the release tooling.
 
 ## Checked, no issue found
 
-- **Crypto construction.** Fresh random 24-byte nonces for every wrap and every save (XChaCha20, so random nonces are safe). The wrap AD covers the KDF parameters and salt; the body AD covers the whole header, so swapping headers between files or downgrading parameters is detected. Argon2id with a single lane; parameters bounded (64–4096 KiB, 3–1000 passes, and memory × passes ≤ 100000 KiB-passes, about 9.5 s on a Cardputer ADV) so a crafted header can only cause a refused unlock, not a crash. *(updated: a header refused this way ran no key derivation and now costs no attempt, #35; the work cap is 100000 and the memory range 64-4096 KiB.)*
+- **Crypto construction.** Fresh random 24-byte nonces for every wrap and every save (XChaCha20, so random nonces are safe). The wrap AD covers the KDF parameters and salt; the body AD covers the whole header, so swapping headers between files or downgrading parameters is detected. Argon2id with a single lane; parameters bounded (64–4096 KiB, 3–1000 passes, and memory × passes ≤ 100000 KiB-passes, about 9.5 s on a Cardputer ADV) so a crafted header can only cause a refused unlock (refunded), not a crash. *(updated: such a header is refused before any key derivation and costs no attempt, #35.)*
 - **Parsing.** Header decode checks length, magic, version and KDF bounds. The body length must be a multiple of the pad block and below the payload limit. The decrypted length prefix is bounds-checked. The TLV reader checks every read and rejects trailing bytes.
 - **Attempt guard ordering.** The counter is committed to NVS before Argon2 runs. A power cut during the check counts as a failure, and an exhausted counter found at boot triggers the wipe. Each reboot restarts the waiting delay from the full value, so rebooting doesn't skip delays.
 - **Wipe.** It erases the whole vault partition, not just the file, then resets the counter. *(updated: the counter is first marked exhausted and reset only after the erase succeeds, #34. SD backups and the settings are not part of the wipe.)*
 - **Randomness.** The hardware RNG runs with its SAR ADC entropy source enabled (radios are off), mixed through a ratcheting BLAKE2b pool that is also stirred with keystroke timings. Modulo bias is avoided by rejection sampling.
 - **Radios.** *(updated)* The Arduino framework links in the Wi-Fi and Bluetooth drivers, but nothing in the code initialises or turns them on; BT controller memory is released at boot.
-- **Logging.** *(updated)* `CORE_DEBUG_LEVEL=0`. The release firmware never writes to `Serial`. The `cardputer-e2e` build prints every entry on request and the `cardputer-debug` build streams the screen; both are test builds on the `cvtvault` partition, and CI checks that release images contain none of that code.
+- **Logging.** *(updated)* `CORE_DEBUG_LEVEL=0`. The release firmware never writes to `Serial`. The `cardputer-e2e` build prints every entry on request and the `cardputer-debug` build dumps the screen over serial on a key press (Ctrl+S); both are test builds on the `cvtvault` partition, and CI checks that release images contain none of that code.
 
 ## Residual risks (accepted, documented)
 
@@ -36,11 +36,11 @@ Scope: everything under `src/`, the on-disk format and the release tooling.
 A second pass fixed the issues below (see [CHANGELOG.md](../CHANGELOG.md) for the details) and added
 regression tests for them (#42). The security-relevant ones: attempt guard fails closed (#35), wipes
 cannot be skipped or looped (#34), the Argon2 work and memory a file can request are bounded before any
-derive (#33, #36), the unlock really costs ~2 s (#37), destructive actions confirm (#38), and secret
+derive (#36), the passphrase policy is enforced in the vault core (#33), the unlock really costs ~2 s (#37), destructive actions confirm (#38), and secret
 hygiene in RAM and on screen (#39). Release and CI hardening is #40. What is *not* fixed is documented
 rather than hidden:
 
-- **Offline guessing of SD backups** needs no download mode and has no attempt limit; the cost is the vault's Argon2 setting.
+- **Offline guessing of SD backups** needs no download mode and has no attempt limit; the cost is the vault's Argon2 setting. *Compact vault* writes its safety copy to the card as a normal backup under the vault passphrase.
 - **Weak KDF memory.** 128 KiB on a Cardputer ADV is time-hard only: ~120 guesses/s on one Apple M1 core against ~0.5/s on the device (measured 2026-10-27, Monocypher's portable code).
 - **Denial of service.** Anyone holding the device can trigger the 10-failure wipe.
 - **Rollback.** Replacing the vault (or restoring a backup) with an older valid one is not detected.

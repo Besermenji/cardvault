@@ -45,9 +45,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
   gone, so CardVault no longer shares storage with other firmware installed with Launcher. Other
   firmware can still read the encrypted vault and reset the attempt counter.
-- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware. The attempt
-  counter is carried over on upgrade from v0.1.0-rc1, but the settings (auto-lock, brightness) go back to
-  their defaults once.
+- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware. On upgrade
+  from v0.1.0-rc1 the settings (auto-lock, brightness) go back to their defaults once.
 
 ### Security
 - Release and CI hardening (#40). The release check (`tools/check_release_image.sh`) runs on the
@@ -75,7 +74,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   erased or damaged), the device allows one more attempt, after a 5-minute wait, instead of starting
   from 0; a correct unlock restores a normal counter. A counter that cannot be read refuses unlocking
   instead of reading as 0, and if the counter storage cannot be opened at boot, unlocking is disabled
-  with an explanation. The counter kept by v0.1.0-rc1 is carried over on upgrade.
+  with an explanation. The counter kept by v0.1.0-rc1 is carried over on upgrade, and only when a vault already exists, so a
+  fresh install never reads another firmware's generic `guard` namespace.
 - Only storage and out-of-memory errors give an attempt back; every other error after the passphrase
   check ran stays counted. Reading the vault file or its header costs no attempt. A vault whose
   passphrase is right but whose payload cannot be read now counts as a correct passphrase, and the
@@ -103,7 +103,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   memory-hard; a wipe covers the vault partition only; anyone holding the device can trigger the
   10-failure wipe; rollback to an older valid vault or backup is not detected; wiping RAM is best
   effort; the radios are linked but never turned on; Launcher behaviour is Launcher's and is not yet
-  verified on hardware; the e2e and debug builds do print secrets (that is what the `cvtvault`
+  verified on hardware; *Compact vault* leaves an ordinary backup under the vault passphrase on the
+  card; the e2e and debug builds do print secrets (that is what the `cvtvault`
   partition is for). The security review notes were brought up to date.
 
 ### Tests

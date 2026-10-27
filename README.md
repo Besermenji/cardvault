@@ -80,7 +80,10 @@ pio run -e cardputer -t upload
 5. **Backups** — Settings → *Backup to SD*. You choose a passphrase for the backup. **A backup file is
    guessable offline**: anyone who gets a copy can try passphrases on a computer with no attempt limit,
    at the same Argon2 cost as the vault. Give it its own long random passphrase; reusing the vault
-   passphrase turns every copy of the file into a second way to attack it.
+   passphrase turns every copy of the file into a second way to attack it. The same goes for the
+   safety copy that *Compact vault* writes (step 6): it is an ordinary backup under the **vault**
+   passphrase, so delete it from the card on a computer once the compaction is done and the vault
+   opens, or treat the card as being as sensitive as the device.
    Restore with Settings → *Restore from SD* (also available on the lock screen via <kbd>Tab</kbd>).
    Backups are numbered (`backup-0001.cvb`, ...) and never overwrite each other; the newest is listed first.
 6. **Compact vault** — Settings → *Compact vault*. Flash keeps old encrypted copies of the vault after
@@ -88,7 +91,8 @@ pio run -e cardputer -t upload
    opens. Compact first saves a verified safety copy to SD (it opens with your vault passphrase), then
    erases the vault storage and writes the current vault back. It needs an SD card, and it is offered
    automatically after a passphrase change or restore. Keep the power on while it runs; if the rewrite
-   fails, the device will not lock until the vault is saved again.
+   fails, the device will not lock until the vault is saved again. Afterwards the card holds
+   `backup-000N.cvb` under the vault passphrase (see step 5).
 
 ## Security model
 

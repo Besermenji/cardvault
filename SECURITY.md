@@ -33,7 +33,10 @@ passphrase alone.
   guessing) and reset the attempt counter stored in the shared NVS partition.
 - Someone who gets a copy of an SD backup (`/cardvault/*.cvb`). It is encrypted and authenticated, but
   offers no attempt limit and the same offline-guessing cost as a flash dump. Give backups their own
-  long random passphrase; reusing the vault passphrase makes every copy a second target for it.
+  long random passphrase; reusing the vault passphrase makes every copy a second target for it. This
+  includes the safety copy that *Compact vault* writes to the card: it is a normal backup under the
+  vault passphrase, so delete it on a computer once the compaction is done, or keep the card as safe as
+  the device.
 - Old encrypted copies left in flash. Every save leaves the previous version behind until its
   space is reused; after a passphrase change or restore, such a copy still opens with the old
   passphrase. Settings › *Compact vault* erases them (it is offered after both).
