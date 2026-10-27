@@ -3,6 +3,8 @@
 #include <LittleFS.h>
 #include <esp_partition.h>
 
+#include <cstring>
+
 #include "vault/format.h"
 
 namespace cv {
@@ -152,5 +154,35 @@ bool FlashStore::erase() {
     mounted_ = LittleFS.begin(true, "/vault", 4, label);
     return ok;
 }
+
+#ifdef CV_TEST_HOOKS
+FlashStore::Probe FlashStore::probe() {
+    Probe r;
+    r.mounted = mounted_;
+    if (mounted_) {
+        r.vault = LittleFS.exists(kFile);
+        r.tmp = LittleFS.exists(kTmp);
+        r.bak = LittleFS.exists(kBak);
+    }
+    const char* label = nullptr;
+    const esp_partition_t* p = find_partition(label);
+    if (!p) return r;
+    // Chunks overlap by 3 bytes so a magic across a boundary is still found.
+    constexpr size_t kChunk = 4096, kMagicLen = 4;
+    static uint8_t buf[kChunk + kMagicLen - 1];
+    size_t carry = 0;
+    for (size_t off = 0; off < p->size; off += kChunk) {
+        size_t n = p->size - off < kChunk ? p->size - off : kChunk;
+        if (esp_partition_read(p, off, buf + carry, n) != ESP_OK) return r;
+        size_t total = carry + n;
+        for (size_t i = 0; i + kMagicLen <= total; i++)
+            if (memcmp(buf + i, "CVLT", kMagicLen) == 0) r.magic_hits++;
+        carry = total >= kMagicLen - 1 ? kMagicLen - 1 : total;
+        memmove(buf, buf + total - carry, carry);
+    }
+    r.scanned = true;
+    return r;
+}
+#endif
 
 }  // namespace cv

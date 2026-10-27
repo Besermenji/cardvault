@@ -1,6 +1,9 @@
 #include <unity.h>
 
+#include <cstdlib>
 #include <cstring>
+#include <new>
+#include <vector>
 
 #include "../common/test_util.h"
 #include "crypto/kdf.h"
@@ -24,6 +27,71 @@ static std::string sha256_hex(const char* s) {
     sha256(reinterpret_cast<const uint8_t*>(s), strlen(s), h);
     return to_hex(h, 32);
 }
+
+// ---- Heap watcher: sees what is in a block at the moment it is freed ---------------
+// Replaces the global allocation functions for this test binary. While a watch
+// is active, every block allocated is remembered, and when it is freed its
+// bytes are checked: any non-zero byte is a "leak" of the old contents.
+namespace {
+struct Watch {
+    struct Block {
+        void* p;
+        size_t n;
+    };
+    static constexpr size_t kMax = 256;
+    Block blocks[kMax];
+    size_t used = 0;
+    bool active = false;
+    size_t freed = 0;      // watched blocks that were freed
+    size_t dirty = 0;      // ... of which still held non-zero bytes
+    size_t overflow = 0;   // blocks not tracked because the table was full
+    void begin() { used = freed = dirty = overflow = 0; active = true; }
+    void end() { active = false; used = 0; }
+    void on_alloc(void* p, size_t n) {
+        if (!active) return;
+        if (used < kMax) blocks[used++] = {p, n};
+        else overflow++;
+    }
+    void on_free(void* p) {
+        if (!p) return;
+        for (size_t i = 0; i < used; i++) {
+            if (blocks[i].p != p) continue;
+            freed++;
+            const uint8_t* b = static_cast<const uint8_t*>(p);
+            for (size_t j = 0; j < blocks[i].n; j++)
+                if (b[j]) {
+                    dirty++;
+                    break;
+                }
+            blocks[i] = blocks[--used];
+            return;
+        }
+    }
+};
+Watch g_watch;
+
+// Ends the watch; every block must have been tracked, or a dirty free of an
+// untracked one would go unseen.
+void watch_end() {
+    g_watch.end();
+    TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.overflow, "heap watcher table full: raise Watch::kMax");
+}
+}  // namespace
+
+void* operator new(size_t n) {
+    void* p = malloc(n ? n : 1);
+    if (!p) abort();
+    g_watch.on_alloc(p, n);
+    return p;
+}
+void* operator new[](size_t n) { return operator new(n); }
+void operator delete(void* p) noexcept {
+    g_watch.on_free(p);
+    free(p);
+}
+void operator delete[](void* p) noexcept { operator delete(p); }
+void operator delete(void* p, size_t) noexcept { operator delete(p); }
+void operator delete[](void* p, size_t) noexcept { operator delete(p); }
 
 void test_sha1_vectors() {
     TEST_ASSERT_EQUAL_STRING("da39a3ee5e6b4b0d3255bfef95601890afd80709", sha1_hex("").c_str());
@@ -70,11 +138,64 @@ void test_kdf_deterministic_and_salted() {
     TEST_ASSERT_TRUE(memcmp(a, d, 32) != 0);
 }
 
+// RFC 9106 section 5.3 (Argon2id): the vendored Monocypher against the spec,
+// including lanes, secret and associated data, which our wrapper never uses.
+void test_argon2id_rfc9106_vector() {
+    uint8_t pass[32], salt[16], key[8], ad[12], tag[32];
+    memset(pass, 0x01, sizeof pass);
+    memset(salt, 0x02, sizeof salt);
+    memset(key, 0x03, sizeof key);
+    memset(ad, 0x04, sizeof ad);
+    static uint8_t work[32 * 1024];
+    crypto_argon2_config cfg = {CRYPTO_ARGON2_ID, 32, 3, 4};
+    crypto_argon2_inputs in = {pass, salt, sizeof pass, sizeof salt};
+    crypto_argon2_extras ex = {key, ad, sizeof key, sizeof ad};
+    crypto_argon2(tag, sizeof tag, work, cfg, in, ex);
+    TEST_ASSERT_EQUAL_STRING("0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659",
+                             to_hex(tag, sizeof tag).c_str());
+}
+
+// Through our wrapper (1 lane, no secret/AD, 16-byte salt, 32-byte output).
+// Reference value from the argon2-cffi package (libargon2), not from this code:
+//   hash_secret_raw(b"correct horse battery", bytes(range(1, 17)), time_cost=3,
+//                   memory_cost=64, parallelism=1, hash_len=32, type=Type.ID,
+//                   version=19)
+void test_kdf_derive_known_answer() {
+    uint8_t salt[16];
+    for (int i = 0; i < 16; i++) salt[i] = uint8_t(i + 1);
+    uint8_t out[32];
+    const char* pw = "correct horse battery";
+    TEST_ASSERT_TRUE(kdf_derive(out, reinterpret_cast<const uint8_t*>(pw), strlen(pw), salt,
+                                KdfParams{64, 3}));
+    TEST_ASSERT_EQUAL_STRING("9342d618db7d56d10b88a161b58228bf82879fa6ebfcd45286937ac5dcd4b124",
+                             to_hex(out, sizeof out).c_str());
+}
+
 void test_kdf_rejects_bad_params() {
     uint8_t out[32], salt[16] = {};
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{8, 3}));
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{64, 1}));
     TEST_ASSERT_FALSE(kdf_derive(out, nullptr, 0, salt, KdfParams{65, 3}));
+}
+
+// Each per-field cap is tested where only that cap can reject (the work cap
+// and the multiple-of-8 rule stay out of the way).
+void test_kdf_field_cap_edges() {
+    // Memory: 4096 is the most allowed; 4104 is rejected by the cap alone.
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMaxKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMaxKdfMemKib + 8, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{0xFFFFFFF8u, kMinKdfPasses}));
+    // Memory must be a multiple of 8: 4097 and 4100 fail even though near the cap.
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMaxKdfMemKib + 1, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{4100, kMinKdfPasses}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib - 8, kMinKdfPasses}));
+    // Passes: 1000 at minimum memory is the most allowed (work 64000 < cap).
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMaxKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMaxKdfPasses + 1}));
+    TEST_ASSERT_TRUE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, kMinKdfPasses - 1}));
+    TEST_ASSERT_FALSE(kdf_params_valid(KdfParams{kMinKdfMemKib, 0}));
 }
 
 void test_kdf_work_cap_edges() {
@@ -297,6 +418,95 @@ void test_wiping_containers() {
     TEST_ASSERT_TRUE(b.empty());
 }
 
+// The control: the watcher must be able to tell a wiped free from an unwiped one,
+// otherwise the tests below prove nothing.
+void test_heap_watch_detects_unwiped_free() {
+    g_watch.begin();
+    {
+        auto* plain = new std::string(200, 'x');  // heap buffer + the object
+        delete plain;
+    }
+    watch_end();
+    TEST_ASSERT_TRUE(g_watch.freed >= 2);
+    TEST_ASSERT_TRUE(g_watch.dirty >= 1);
+}
+
+void test_sstring_heap_buffers_are_zero_when_freed() {
+    g_watch.begin();
+    {
+        SString s(40, 'k');           // heap: past the small-string buffer
+        for (int i = 0; i < 6; i++) s.append(200, 's');  // reallocates and frees the old buffer
+        TEST_ASSERT_TRUE(s.size() > 1000);
+        wipe(s);                      // frees the last buffer
+        s.assign(100, 'z');           // a fresh buffer, released by the destructor
+    }
+    watch_end();
+    TEST_ASSERT_TRUE_MESSAGE(g_watch.freed >= 3, "expected several buffers to be freed");
+    TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.dirty, "a freed SString buffer still held secret bytes");
+}
+
+void test_sbytes_and_svec_heap_buffers_are_zero_when_freed() {
+    g_watch.begin();
+    {
+        SBytes b;
+        for (int i = 0; i < 300; i++) b.push_back(0xA5);  // growth frees every old buffer
+        SBytes copy = b;
+        b.resize(8);
+        b.shrink_to_fit();
+        SVec<uint32_t> v;
+        for (uint32_t i = 0; i < 200; i++) v.push_back(0xDEADBEEF);
+        std::vector<SString, WipingAllocator<SString>> names(4, SString(64, 'n'));
+        names.push_back(SString(64, 'm'));
+    }
+    watch_end();
+    TEST_ASSERT_TRUE(g_watch.freed >= 8);
+    TEST_ASSERT_EQUAL_MESSAGE(0, g_watch.dirty, "a freed buffer still held secret bytes");
+}
+
+// Objects that keep secrets inline (no heap) can only be checked in place.
+void test_secretbox_wipes_inline_buffer_on_destruction() {
+    alignas(SecretBox) uint8_t raw[sizeof(SecretBox)];
+    memset(raw, 0xEE, sizeof raw);
+    auto* box = new (raw) SecretBox();
+    box->value = "hunter2";  // small-string buffer, inside the object
+    const char* inl = box->value.data();
+    TEST_ASSERT_TRUE_MESSAGE(inl >= reinterpret_cast<char*>(raw) &&
+                                 inl < reinterpret_cast<char*>(raw) + sizeof raw,
+                             "precondition: the value lives inside the object");
+    box->~SecretBox();
+    const volatile uint8_t* seen = reinterpret_cast<const volatile uint8_t*>(inl);
+    for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, seen[i]);
+}
+
+void test_secretbox_wipes_heap_value_on_destruction() {
+    g_watch.begin();
+    {
+        SecretBox box;
+        box.value.assign(120, 'q');
+    }
+    watch_end();
+    TEST_ASSERT_TRUE(g_watch.freed >= 1);
+    TEST_ASSERT_EQUAL(0, g_watch.dirty);
+}
+
+void test_secretkey_wipes_on_destruction() {
+    alignas(Key32) uint8_t raw[sizeof(Key32)];
+    memset(raw, 0xEE, sizeof raw);
+    auto* key = new (raw) Key32();
+    for (size_t i = 0; i < Key32::size(); i++) key->data()[i] = uint8_t(0x40 + i);
+    key->~Key32();
+    const volatile uint8_t* seen = raw;
+    for (size_t i = 0; i < sizeof raw; i++) TEST_ASSERT_EQUAL_UINT8(0, seen[i]);
+
+    alignas(SecretKey<64>) uint8_t raw2[sizeof(SecretKey<64>)];
+    memset(raw2, 0xEE, sizeof raw2);
+    auto* k2 = new (raw2) SecretKey<64>();
+    memset(k2->data(), 0x77, 64);
+    k2->~SecretKey<64>();
+    const volatile uint8_t* seen2 = raw2;
+    for (size_t i = 0; i < sizeof raw2; i++) TEST_ASSERT_EQUAL_UINT8(0, seen2[i]);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_sha1_vectors);
@@ -304,6 +514,9 @@ int main() {
     RUN_TEST(test_hmac_sha1_rfc2202);
     RUN_TEST(test_kdf_deterministic_and_salted);
     RUN_TEST(test_kdf_rejects_bad_params);
+    RUN_TEST(test_argon2id_rfc9106_vector);
+    RUN_TEST(test_kdf_derive_known_answer);
+    RUN_TEST(test_kdf_field_cap_edges);
     RUN_TEST(test_kdf_work_cap_edges);
     RUN_TEST(test_tune_hits_target_and_estimates_overhead);
     RUN_TEST(test_tune_ignores_cold_start);
@@ -319,5 +532,11 @@ int main() {
     RUN_TEST(test_pick_mem_follows_heap);
     RUN_TEST(test_rng_uniform_range_and_variety);
     RUN_TEST(test_wiping_containers);
+    RUN_TEST(test_heap_watch_detects_unwiped_free);
+    RUN_TEST(test_sstring_heap_buffers_are_zero_when_freed);
+    RUN_TEST(test_sbytes_and_svec_heap_buffers_are_zero_when_freed);
+    RUN_TEST(test_secretbox_wipes_inline_buffer_on_destruction);
+    RUN_TEST(test_secretbox_wipes_heap_value_on_destruction);
+    RUN_TEST(test_secretkey_wipes_on_destruction);
     return UNITY_END();
 }

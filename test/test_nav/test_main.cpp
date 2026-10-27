@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/header_tamper.h"
 #include "core/flows.h"
 #include "core/messages.h"
 #include "crypto/kdf.h"
@@ -395,7 +396,7 @@ struct Fixture {
     AttemptGuard guard{kv};
     VaultSession session;
     Fixture() {
-        guard.reset();  // setup writes a real 0; a missing counter would read as 5
+        guard.reset();  // setup writes a real 0; a missing counter would read as 9
         session.create(store, "right horse battery", kFast);
         Entry e;
         e.type = EntryType::Note;
@@ -875,6 +876,35 @@ void test_unlock_unreadable_header_costs_nothing() {
     TEST_ASSERT_EQUAL(0, f.guard.failures());
 }
 
+// Header fields that fail before any KDF runs cost no attempt, on unlock and
+// on restore, and are reported as damage rather than as a wrong passphrase.
+void test_header_field_errors_cost_no_attempt() {
+    for (const test::HeaderTamper& c : test::header_tampers()) {
+        Fixture f;
+        c.apply(f.store.blob);
+        uint32_t derives = kdf_derive_count();
+        for (int i = 0; i < 12; i++) {  // more than kMaxAttempts: must never wipe
+            UnlockResult r = unlock_attempt(f.guard, f.session, f.store, "guess");
+            TEST_ASSERT_EQUAL_MESSAGE(int(UnlockResult::Damaged), int(r.kind), c.what);
+            TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(r.error), c.what);
+            TEST_ASSERT_FALSE_MESSAGE(r.passphrase_ok, c.what);
+            TEST_ASSERT_EQUAL_MESSAGE(0, f.guard.failures(), c.what);
+        }
+        TEST_ASSERT_EQUAL_MESSAGE(derives, kdf_derive_count(), c.what);
+
+        auto backup = make_backup("backup pass", 1);  // derives keys itself
+        c.apply(backup);
+        derives = kdf_derive_count();
+        for (bool locked : {true, false}) {
+            RestoreCheck rc = restore_check(f.guard, locked, backup, "backup pass");
+            TEST_ASSERT_EQUAL_MESSAGE(int(RestoreCheck::Failed), int(rc.kind), c.what);
+            TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(rc.error), c.what);
+            TEST_ASSERT_EQUAL_MESSAGE(0, f.guard.failures(), c.what);
+        }
+        TEST_ASSERT_EQUAL_MESSAGE(derives, kdf_derive_count(), c.what);
+    }
+}
+
 void test_unlock_io_error_never_touches_counter() {
     Fixture f;
     f.kv.fail_writes = true;  // would be Refused if the attempt were begun
@@ -1092,6 +1122,7 @@ int main() {
     RUN_TEST(test_restore_corrupt_image_refunds);
     RUN_TEST(test_unlock_payload_version_error_counts_as_correct_passphrase);
     RUN_TEST(test_unlock_unreadable_header_costs_nothing);
+    RUN_TEST(test_header_field_errors_cost_no_attempt);
     RUN_TEST(test_unlock_io_error_never_touches_counter);
     RUN_TEST(test_unlock_with_counter_missing_allows_one_guess);
     RUN_TEST(test_unlock_refused_when_counter_unreadable);

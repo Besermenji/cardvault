@@ -18,6 +18,12 @@ uint32_t kdf_max_passes(uint32_t mem_kib) {
     return by_work < kMaxKdfPasses ? uint32_t(by_work) : kMaxKdfPasses;
 }
 
+namespace {
+uint32_t g_derives = 0;
+}
+
+uint32_t kdf_derive_count() { return g_derives; }
+
 bool kdf_derive(uint8_t out[32], const uint8_t* pass, size_t pass_len,
                 const uint8_t salt[kSaltSize], const KdfParams& p) {
     if (!kdf_params_valid(p)) return false;
@@ -28,6 +34,7 @@ bool kdf_derive(uint8_t out[32], const uint8_t* pass, size_t pass_len,
     crypto_argon2_config cfg = {CRYPTO_ARGON2_ID, p.mem_kib, p.passes, 1};
     crypto_argon2_inputs in = {pass, salt, uint32_t(pass_len), uint32_t(kSaltSize)};
     crypto_argon2(out, 32, work, cfg, in, crypto_argon2_no_extras);
+    g_derives++;
 
     wipe(work, work_size);
     free(work);

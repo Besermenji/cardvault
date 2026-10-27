@@ -40,10 +40,19 @@ class Skip(Exception):
     pass
 
 
+# "OK <id> <payload>" / "ERR <id> <message>"; id is "-" when the device could
+# not read one.
+REPLY = re.compile(r"^(OK|ERR) (\d+|-)(?: (.*))?$")
+
+
 class Device:
     def __init__(self, port):
         self.port = port
         self.ser = None
+        self.seq = 0  # last request id
+        self.rx = b""  # bytes read but not yet split into lines
+        self.stale = 0  # replies that arrived for an earlier request
+        self.unreadable = []  # requests the device could not parse ("ERR -")
         self.connect()
 
     # -- transport ---------------------------------------------------------------
@@ -55,7 +64,8 @@ class Device:
                 self.ser = serial.Serial(self.port, 115200, timeout=0.2)
                 time.sleep(0.3)
                 self.ser.reset_input_buffer()
-                if self.cmd("ping", timeout=2, retry=False) == "pong":
+                self.rx = b""
+                if self.cmd("ping", timeout=2) == "pong":
                     return
             except (serial.SerialException, OSError, Fail):
                 pass
@@ -67,34 +77,45 @@ class Device:
             time.sleep(0.5)
         raise Fail(f"device on {self.port} not responding")
 
-    def cmd(self, line, timeout=10, retry=True):
-        try:
-            self.ser.write((line + "\n").encode())
-            end = time.time() + timeout
-            buf = b""
-            while time.time() < end:
-                buf += self.ser.read(256)
-                while b"\n" in buf:
-                    raw, buf = buf.split(b"\n", 1)
-                    text = raw.decode(errors="replace").strip()
-                    if text.startswith("OK"):
-                        return text[3:]
-                    if text.startswith("ERR"):
-                        raise Fail(f"{line!r}: {text}")
-        except (serial.SerialException, OSError):
-            if not retry:
-                raise
-            self.connect()
-            return self.cmd(line, timeout, retry=False)
-        raise Fail(f"no reply to {line!r}")
+    def cmd(self, line, timeout=10):
+        """Send `line` with a fresh request id and return the payload of the
+        reply that carries the same id. Replies to earlier requests (late
+        answers after a timeout) are counted and skipped. A dropped link is
+        not retried: on native USB it means the device reset, and resending
+        would hide that."""
+        self.seq += 1
+        rid = str(self.seq)
+        self.ser.write(f"{rid} {line}\n".encode())
+        end = time.time() + timeout
+        while time.time() < end:
+            self.rx += self.ser.read(256)
+            while b"\n" in self.rx:
+                raw, self.rx = self.rx.split(b"\n", 1)
+                m = REPLY.match(raw.decode(errors="replace").strip())
+                if not m:
+                    continue  # boot output, CVTEST READY
+                kind, got, payload = m.group(1), m.group(2), m.group(3) or ""
+                if got == "-":
+                    # Some line had no readable id: maybe ours, maybe an old
+                    # fragment. Not proof either way; keep waiting for ours.
+                    self.unreadable.append(payload)
+                    continue
+                if got != rid:
+                    self.stale += 1
+                    continue
+                if kind == "ERR":
+                    raise Fail(f"{line!r}: {payload}")
+                return payload
+        note = f" (device could not parse: {self.unreadable[-3:]})" if self.unreadable else ""
+        raise Fail(f"no reply to {line!r}{note}")
 
     def restart_cmd(self, line):
-        """Send a command that reboots the device, then reconnect."""
+        """Send a command that reboots the device, then reconnect. The device
+        answers before it restarts; an ERR (a failed factory reset) fails."""
         try:
-            self.ser.write((line + "\n").encode())
-            self.ser.flush()
-        except serial.SerialException:
-            pass
+            self.cmd(line, timeout=30)
+        except (serial.SerialException, OSError):
+            pass  # the link went away with the reboot
         time.sleep(1.5)
         try:
             self.ser.close()
@@ -121,9 +142,17 @@ class Device:
         return json.loads(self.cmd("state"))
 
     def dump(self):
+        """The unlocked session's entries (RAM only: says nothing about flash)."""
         return json.loads(self.cmd("dump"))
 
+    def storage(self):
+        """What is really stored: vault files, the raw partition, the NVS counter."""
+        return json.loads(self.cmd("storage", timeout=30))
+
     def key(self, name, times=1):
+        # The device handles each request in order and drains its key queue on
+        # every loop, so a reply-per-key keeps keys from piling up behind one
+        # that changes the screen (which discards the queue).
         for _ in range(times):
             self.cmd(f"key {name}")
         time.sleep(0.05)
@@ -184,6 +213,25 @@ def check(cond, msg):
         raise Fail(msg)
 
 
+def assert_vault_stored(d):
+    """A vault file exists and its ciphertext is in the raw partition."""
+    st = d.storage()
+    check(st["scanned"] and st["mounted"] and st["vault"] and st["magic_hits"] >= 1,
+          f"expected a stored vault: {st}")
+    return st
+
+
+def assert_wiped(d):
+    """Nothing of the vault is left: no files, no vault bytes anywhere in the
+    partition (old copy-on-write copies included), counter reset to 0."""
+    st = d.storage()
+    check(st["scanned"], f"could not read the partition: {st}")
+    check(not (st["vault"] or st["tmp"] or st["bak"]), f"vault files left after wipe: {st}")
+    check(st["magic_hits"] == 0, f"vault bytes left in the partition after wipe: {st}")
+    check(st["counter"] == "ok:0", f"attempt counter not reset after wipe: {st}")
+    return st
+
+
 def totp(secret_b32, t, period=30, digits=6):
     import base64
     key = base64.b32decode(secret_b32 + "=" * (-len(secret_b32) % 8))
@@ -232,6 +280,19 @@ def open_setting(d, row):
     d.key("enter")
 
 
+def empty_backup_passphrase_refused(d):
+    """Regression #32: ENTER and TAB on an empty Backup passphrase only warn.
+    No key is derived, no attempt is counted, the prompt stays open."""
+    d.screen("text_input", "Backup passphrase")
+    fails = d.state()["fails"]
+    for k in ("enter", "tab"):
+        d.key(k)
+        d.toast("At least 1")
+        st = d.screen("text_input", "Backup passphrase")
+        check(st["fails"] == fails, f"an empty backup passphrase must not count: {st}")
+        d.wait(lambda s: s["toast"] == "", "warning gone", 8)
+
+
 def backup_name_in(st):
     m = re.search(r"backup-\d+\.cvb", info(st).get("msg", ""))
     check(m is not None, f"no backup file name in: {st}")
@@ -241,6 +302,28 @@ def backup_name_in(st):
 def need_card():
     if not SD_CARD:
         raise Skip("needs --sd and a FAT32 card in the device")
+
+
+def find_one(d, title):
+    """The single entry with this title (fails on none or several)."""
+    found = [e for e in d.dump() if e["title"] == title]
+    check(len(found) == 1, f"expected one entry titled {title!r}, found {len(found)}")
+    return found[0]
+
+
+def delete_entry(d, title):
+    go_home(d)
+    d.type(title)
+    d.wait(lambda s: info(s)["rows"] == "1", f"search finds {title}")
+    d.key("enter")
+    d.screen("entry_view")
+    d.key("tab")
+    d.menu_pick("Delete")
+    d.screen("confirm", "Delete secret?")
+    d.key("y")
+    d.screen("home")
+    d.key("esc")  # clear the search
+    d.screen("home")
 
 
 def set_title(d, title):
@@ -261,6 +344,7 @@ def t01_factory_boot_shows_setup(d):
     d.restart_cmd("factory")
     st = d.screen("setup")
     check(not st["open"] and st["fails"] == 0, f"unexpected state {st}")
+    assert_wiped(d)
 
 
 def t02_setup_validation_and_create(d):
@@ -545,6 +629,7 @@ def t15_power_cut_mid_attempt_still_counts(d):
 
 
 def t16_ten_wrong_passphrases_wipe(d):
+    assert_vault_stored(d)  # so the wiped check below can tell the two apart
     d.lock()
     for i in range(1, 11):
         st = d.wait(lambda s: s["screen"] != "unlock" or int(info(s)["wait_ms"]) == 0,
@@ -570,11 +655,12 @@ def t16_ten_wrong_passphrases_wipe(d):
     d.connect(timeout=40)
     st = d.screen("setup", timeout=30)
     check(st["fails"] == 0, f"counter must be cleared after the wipe: {st}")
-    check(d.dump() == [], "data left after wipe")
+    assert_wiped(d)
 
 
 def t17_erase_from_settings(d):
     t02_setup_validation_and_create(d)
+    assert_vault_stored(d)
     d.key("tab")
     d.menu_pick("Settings")
     d.screen("settings")
@@ -589,7 +675,8 @@ def t17_erase_from_settings(d):
     d.type("ERASE")
     d.restart_cmd("key enter")  # erases, reboots and reconnects
     st = d.screen("setup", timeout=40)
-    check(d.dump() == [] and st["fails"] == 0, f"vault not erased: {st}")
+    check(st["fails"] == 0, f"counter not reset: {st}")
+    assert_wiped(d)
 
 
 def t18_tab_never_saves(d):
@@ -740,7 +827,7 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    empty_backup_passphrase_refused(d)  # unlocked
     d.type("not the backup pass")
     d.key("enter")
     st = d.screen("message", "Restore failed", timeout=30)
@@ -769,7 +856,7 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    empty_backup_passphrase_refused(d)  # locked: nothing is open yet
     d.type(P3)
     d.key("enter")
     d.screen("confirm", "Replace vault?", timeout=30)
@@ -976,6 +1063,18 @@ def t22_confirm_and_validation(d):
     finally:
         d.cmd(f"settime {int(time.time())}")
 
+    # With the clock set, Set clock starts from the real time (YYYY-MM-DD HH:MM).
+    d.key("tab")
+    d.menu_pick("2FA codes")
+    d.screen("totp_list")
+    d.key("t")
+    st = d.screen("text_input", "Set clock (UTC)")
+    check(info(st)["len"] == "16", f"clock input must start from the current time: {st}")
+    d.key("esc")  # untouched: closes without a question
+    d.screen("totp_list")
+    d.key("esc")
+    go_home(d)
+
 
 def t23_secret_hygiene(d):
     # Regression #39: ENTER reveals one secret row only, reveals time out
@@ -1115,6 +1214,146 @@ def t23_secret_hygiene(d):
     d.unlock(pw)
 
 
+def t24_tab_cascade_and_clear_field(d):
+    # Regression #31: TAB must never create, change or delete data on any
+    # screen, and clearing a stored optional field asks first and sticks.
+    pw = P3 if SD_CARD else P1
+    if d.state()["screen"] == "unlock":
+        d.unlock(pw)
+    go_home(d)
+    run = int(time.time()) % 100000  # unique titles, so reruns find only this run's
+    note_t, pw_t, totp_t = f"TabNote{run}", f"ClearMe{run}", f"Acme{run}"
+
+    def storm(what, times=8):
+        before = d.dump()
+        fails = d.state()["fails"]
+        d.key("tab", times)
+        st = d.state()  # still answering: nothing crashed or restarted
+        check(st["open"] and st["fails"] == fails, f"TAB on {what} changed state: {st}")
+        check(d.dump() == before, f"TAB on {what} created, changed or deleted data")
+        go_home(d)
+
+    # Menus and tools.
+    d.key("tab")
+    d.screen("menu", "Menu")
+    storm("the main menu")
+    d.key("tab")
+    d.menu_pick("Settings")
+    d.screen("settings")
+    storm("settings")
+    d.key("tab")
+    d.menu_pick("2FA codes")
+    d.screen("totp_list")
+    storm("the 2FA list")
+    d.key("tab")
+    d.menu_pick("Password generator")
+    d.screen("pwgen")
+    storm("the password generator")
+
+    # Every editor, then the inputs reached from them.
+    for label in ("Seed phrase", "Password", "2FA (TOTP)", "Note"):
+        new_entry(d, label)
+        storm(f"the {label} editor")
+    new_entry(d, "Note")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    storm("a text input")
+    new_entry(d, "Seed phrase")
+    d.key("down")
+    d.key("enter")
+    d.menu_pick("Type 12 words")
+    d.screen("mnemonic_input")
+    storm("the seed word input")
+
+    # A saved entry: its viewer and its action menu.
+    new_entry(d, "Note")
+    set_title(d, note_t)
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("tab test")
+    d.key("tab")  # multi-line: Enter is a newline, TAB is done
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    storm("the entry viewer")
+    find_one(d, note_t)
+
+    # Clearing a stored optional field: asks, and a yes sticks across a reboot.
+    new_entry(d, "Password")
+    set_title(d, pw_t)
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.type("alice")
+    d.key("enter")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type("hunter22")
+    d.key("enter")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("down")  # Username
+    d.key("enter")
+    d.screen("text_input", "Username")
+    d.key("bs", 5)
+    d.key("enter")
+    d.screen("confirm", "Clear Username?")
+    d.key("y")
+    st = d.screen("entry_edit")
+    check(info(st)["dirty"] == "1", f"a confirmed clear must change the draft: {st}")
+    save_entry(d)
+    d.screen("entry_view")
+
+    new_entry(d, "2FA (TOTP)")
+    d.key("down")  # Issuer
+    d.key("enter")
+    d.screen("text_input", "Issuer")
+    d.type(totp_t)  # the title defaults to the issuer
+    d.key("enter")
+    d.key("down")  # Secret
+    d.key("enter")
+    d.screen("text_input", "Secret (base32)")
+    d.type(TOTP_SECRET)
+    d.key("enter")
+    save_entry(d)
+    d.screen("entry_view")
+    d.key("e")
+    d.screen("entry_edit")
+    d.key("down")  # Issuer
+    d.key("enter")
+    d.screen("text_input", "Issuer")
+    d.key("bs", len(totp_t))
+    d.key("enter")
+    d.screen("confirm", "Clear Issuer?")
+    d.key("y")
+    save_entry(d)
+    d.screen("entry_view")
+
+    def cleared():
+        me = find_one(d, pw_t)
+        check(me["fields"].get("4", "") == "" and me["fields"]["5"] == "hunter22",
+              f"username must be cleared, password kept: {me}")
+        acme = find_one(d, totp_t)
+        check(acme["fields"].get("11", "") == "" and acme["fields"]["8"] == TOTP_SECRET,
+              f"issuer must be cleared, secret kept: {acme}")
+
+    cleared()
+    d.restart_cmd("reboot")
+    d.unlock(pw)
+    cleared()
+
+    # Leave the vault as this scenario found it.
+    for title in (note_t, pw_t, totp_t):
+        delete_entry(d, title)
+    check(not any(e["title"] in (note_t, pw_t, totp_t) for e in d.dump()),
+          "test entries left behind")
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 
@@ -1148,6 +1387,9 @@ def main():
                 print("stopping: later scenarios depend on earlier ones")
                 break
     print(f"\n{passed} passed, {failed} failed, {skipped} skipped")
+    if d.stale or d.unreadable:
+        print(f"transport: {d.stale} late replies skipped, "
+              f"{len(d.unreadable)} requests the device could not parse")
     sys.exit(1 if failed else 0)
 
 

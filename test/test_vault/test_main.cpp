@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "../common/header_tamper.h"
 #include "crypto/rng.h"
 #include "vault/serializer.h"
 #include "vault/session.h"
@@ -101,6 +102,42 @@ void test_file_is_padded_and_has_no_plaintext() {
     std::string raw(store.blob.begin(), store.blob.end());
     TEST_ASSERT_EQUAL(std::string::npos, raw.find("SecretMarker"));
     TEST_ASSERT_EQUAL(std::string::npos, raw.find("TitleMarker"));
+}
+
+void test_header_tamper_rejected_before_kdf() {
+    MemoryStore store;
+    VaultSession s;
+    s.create(store, "pw-test-pass", kFast);
+    s.close();
+    const std::vector<uint8_t> good = store.blob;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(good.data(), good.size())));
+
+    for (const test::HeaderTamper& c : test::header_tampers()) {
+        std::vector<uint8_t> bad = good;
+        c.apply(bad);
+        TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(check_layout(bad.data(), bad.size())), c.what);
+        // Same answer through a session unlock, and no key was derived.
+        store.blob = bad;
+        VaultSession t;
+        uint32_t derives = kdf_derive_count();
+        TEST_ASSERT_EQUAL_MESSAGE(int(c.expect), int(t.unlock(store, "pw-test-pass")), c.what);
+        TEST_ASSERT_EQUAL_MESSAGE(derives, kdf_derive_count(), c.what);
+        TEST_ASSERT_FALSE_MESSAGE(t.is_open(), c.what);
+    }
+
+    // The reserved bytes are not validated by the header parser. The key wrap
+    // re-encodes them as 0, so the passphrase still opens it (the KDF runs,
+    // which also shows the counter above can see a derive), but the whole
+    // header is the body's associated data, so the body fails to open.
+    std::vector<uint8_t> bad = good;
+    bad[6] ^= 1;
+    TEST_ASSERT_EQUAL(int(VaultError::Ok), int(check_layout(bad.data(), bad.size())));
+    store.blob = bad;
+    VaultSession t;
+    uint32_t derives = kdf_derive_count();
+    TEST_ASSERT_EQUAL(int(VaultError::Corrupt), int(t.unlock(store, "pw-test-pass")));
+    TEST_ASSERT_EQUAL(derives + 1, kdf_derive_count());
+    TEST_ASSERT_FALSE(t.is_open());
 }
 
 void test_tamper_detection() {
@@ -329,9 +366,8 @@ void test_wipe_string_clears_inline_buffer_and_dead_bytes() {
     wipe(s);
     TEST_ASSERT_TRUE(s.empty());
     // The inline buffer lives in the object; shrink_to_fit keeps it in place.
-    if (s.data() == buf) {
-        for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, uint8_t(buf[i]));
-    }
+    TEST_ASSERT_TRUE_MESSAGE(s.data() == buf, "precondition: the value stayed in the inline buffer");
+    for (size_t i = 0; i < 15; i++) TEST_ASSERT_EQUAL_UINT8(0, uint8_t(buf[i]));
 }
 
 void test_serialized_size_matches_serialize() {
@@ -462,6 +498,7 @@ int main() {
     RUN_TEST(test_create_unlock_round_trip);
     RUN_TEST(test_wrong_passphrase);
     RUN_TEST(test_file_is_padded_and_has_no_plaintext);
+    RUN_TEST(test_header_tamper_rejected_before_kdf);
     RUN_TEST(test_tamper_detection);
     RUN_TEST(test_change_passphrase);
     RUN_TEST(test_export_and_restore_backup);

@@ -15,6 +15,9 @@ namespace {
 
 std::string g_line;
 bool g_g0 = false;
+// Id of the request being answered ("-" when the line had none). Every reply
+// carries it, so the host can tell a late reply from the one it waits for.
+std::string g_id = "-";
 
 std::string esc(const std::string& s) {
     std::string o;
@@ -38,10 +41,14 @@ std::string esc(const std::string& s) {
 
 void reply(const std::string& s) {
     Serial.print("OK ");
+    Serial.print(g_id.c_str());
+    Serial.print(' ');
     Serial.println(s.c_str());
 }
 void error(const char* s) {
     Serial.print("ERR ");
+    Serial.print(g_id.c_str());
+    Serial.print(' ');
     Serial.println(s);
 }
 
@@ -102,7 +109,40 @@ void dump(ui::App& a) {
     reply(j + "]");
 }
 
-void handle(ui::App& a, const std::string& line) {
+// What is really on flash/NVS, not what the session holds in RAM.
+void storage(ui::App& a) {
+    FlashStore::Probe pr = a.store.probe();
+    uint32_t fails = 0;
+    KvRead kr = a.guard_kv.get_u32("fails", fails);
+    std::string counter = kr == KvRead::Ok ? "ok:" + std::to_string(fails)
+                          : kr == KvRead::Missing ? "missing" : "error";
+    auto b = [](bool v) { return v ? "true" : "false"; };
+    std::string j = "{";
+    j += "\"mounted\":" + std::string(b(pr.mounted));
+    j += ",\"vault\":" + std::string(b(pr.vault));
+    j += ",\"tmp\":" + std::string(b(pr.tmp));
+    j += ",\"bak\":" + std::string(b(pr.bak));
+    j += ",\"scanned\":" + std::string(b(pr.scanned));
+    j += ",\"magic_hits\":" + std::to_string(pr.magic_hits);
+    j += ",\"counter\":\"" + counter + "\"}";
+    reply(j);
+}
+
+// "<id> <command> [argument]"; the id is a decimal number chosen by the host.
+void handle(ui::App& a, const std::string& request) {
+    std::string line;
+    size_t idlen = request.find(' ');
+    if (idlen == std::string::npos) idlen = request.size();
+    bool numeric = idlen > 0 && idlen <= 18;
+    for (size_t i = 0; i < idlen && numeric; i++)
+        if (request[i] < '0' || request[i] > '9') numeric = false;
+    if (!numeric) {
+        g_id = "-";
+        return error("bad request");
+    }
+    g_id = request.substr(0, idlen);
+    if (idlen < request.size()) line = request.substr(idlen + 1);
+
     std::string cmd = line, arg;
     auto sp = line.find(' ');
     if (sp != std::string::npos) {
@@ -115,6 +155,8 @@ void handle(ui::App& a, const std::string& line) {
         state(a);
     } else if (cmd == "dump") {
         dump(a);
+    } else if (cmd == "storage") {
+        storage(a);
     } else if (cmd == "key") {
         ui::Key k;
         if (!key_named(arg, k)) return error("unknown key");
