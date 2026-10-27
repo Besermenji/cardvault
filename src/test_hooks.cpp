@@ -240,10 +240,11 @@ void handle(ui::App& a, const std::string& request) {
         } else if (arg == "off") {
             sd::test_cut_after_ms(-1);
             sd::test_cut_miso(false);
-        } else if (!arg.empty() && arg.find_first_not_of("0123456789") == std::string::npos) {
+        } else if (!arg.empty() && arg.size() <= 6 &&
+                   arg.find_first_not_of("0123456789") == std::string::npos) {
             sd::test_cut_after_ms(int32_t(atol(arg.c_str())));
         } else {
-            error("sdcut on|off|<ms>");
+            error("sdcut on|off|<0-999999 ms>");
             return;
         }
         reply("");

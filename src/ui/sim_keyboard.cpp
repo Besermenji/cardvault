@@ -3,47 +3,34 @@
 #include "ui/sim_keyboard.h"
 
 #include <algorithm>
-#include <memory>
 
 namespace cv {
 namespace ui {
 
 namespace {
-SimKeyboardReader* g_reader = nullptr;
-}
+std::vector<Point2D_t> g_sim;    // keys the host holds down
+std::vector<Point2D_t> g_added;  // sim keys currently in the library's key list
+}  // namespace
 
-void SimKeyboardReader::update() {
-    // Take the previous simulated keys out so a real key that is released
-    // meanwhile is handled by the base class on its own.
-    for (const auto& p : added_) {
-        auto it = std::find(_key_list.begin(), _key_list.end(), p);
-        if (it != _key_list.end()) _key_list.erase(it);
+void set_sim_keys(const std::vector<Point2D_t>& keys) { g_sim = keys; }
+
+void apply_sim_keys() {
+    auto& kb = M5Cardputer.Keyboard;
+    if (g_sim.empty() && g_added.empty()) return;
+    // The library hands out its key list read-only; this test-only overlay edits it.
+    auto& list = const_cast<std::vector<Point2D_t>&>(kb.keyList());
+    for (const auto& p : g_added) {
+        auto it = std::find(list.begin(), list.end(), p);
+        if (it != list.end()) list.erase(it);
     }
-    added_.clear();
-    TCA8418KeyboardReader::update();
-    for (const auto& p : sim_) {
-        if (std::find(_key_list.begin(), _key_list.end(), p) == _key_list.end()) {
-            _key_list.push_back(p);
-            added_.push_back(p);
+    g_added.clear();
+    for (const auto& p : g_sim) {
+        if (std::find(list.begin(), list.end(), p) == list.end()) {
+            list.push_back(p);
+            g_added.push_back(p);
         }
     }
-}
-
-SimKeyboardReader& install_sim_keyboard() {
-    auto r = std::make_unique<SimKeyboardReader>();
-    g_reader = r.get();
-    M5Cardputer.Keyboard.begin(std::move(r));
-    return *g_reader;
-}
-
-void update_inputs() {
-    M5.update();
-    M5Cardputer.Keyboard.updateKeyList();
-    M5Cardputer.Keyboard.updateKeysState();
-}
-
-void set_sim_keys(const std::vector<Point2D_t>& keys) {
-    if (g_reader) g_reader->set_keys(keys);
+    kb.updateKeysState();
 }
 
 }  // namespace ui

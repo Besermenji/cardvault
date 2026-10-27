@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 
 #ifdef CV_TEST_HOOKS
 #include <esp_rom_gpio.h>
@@ -34,9 +35,64 @@ enum JobState : int { kIdle, kRunning, kDone, kAbandoned };
 std::atomic<int> g_job{kIdle};
 std::atomic<bool> g_job_ok{false};
 
+#ifdef CV_TEST_HOOKS
+// MISO is held high while g_cut is set. SPI.begin() attaches the pin again, so
+// mount_task() applies the cut after it: a card pulled stays pulled over a remount.
+bool g_cut = false;
+std::atomic<int32_t> g_cut_after_ms{-1};
+esp_timer_handle_t g_cut_timer = nullptr;
+// Serialises the timer callback with the hook commands: esp_timer_stop() does
+// not wait for a callback that is already running.
+std::mutex g_cut_mutex;
+bool g_cut_pending = false;  // a timer is armed and has not fired
+
+void apply_cut() {
+    esp_rom_gpio_connect_in_signal(g_cut ? GPIO_MATRIX_CONST_ONE_INPUT : uint32_t(kMiso),
+                                   FSPIQ_IN_IDX, false);
+}
+
+void cut_timer_cb(void*) {
+    std::lock_guard<std::mutex> lock(g_cut_mutex);
+    if (!g_cut_pending) return;
+    g_cut_pending = false;
+    g_cut = true;
+    apply_cut();
+}
+
+// Called as a backup write or read is entered, before anything can return early,
+// so an armed cut is always used by the very next operation.
+void arm_cut() {
+    int32_t ms = g_cut_after_ms.exchange(-1);
+    if (ms < 0) return;
+    std::lock_guard<std::mutex> lock(g_cut_mutex);
+    if (ms == 0) {
+        g_cut = true;
+        apply_cut();
+        return;
+    }
+    if (!g_cut_timer) {
+        esp_timer_create_args_t args = {};
+        args.callback = cut_timer_cb;
+        args.name = "sd_cut";
+        if (esp_timer_create(&args, &g_cut_timer) != ESP_OK) return;
+    }
+    esp_timer_stop(g_cut_timer);
+    g_cut_pending = true;
+    esp_timer_start_once(g_cut_timer, uint64_t(ms) * 1000);
+}
+#else
+inline void arm_cut() {}
+#endif
+
 void mount_task(void*) {
     // Same wiring as M5's Cardputer SD example: the default SPI bus.
     SPI.begin(kSck, kMiso, kMosi, kCs);
+#ifdef CV_TEST_HOOKS
+    {
+        std::lock_guard<std::mutex> lock(g_cut_mutex);
+        if (g_cut) apply_cut();
+    }
+#endif
     bool ok = SD.begin(kCs, SPI, kSpiHz);
     g_job_ok = ok;
     int expected = kRunning;
@@ -49,41 +105,20 @@ void mount_task(void*) {
     vTaskDelete(nullptr);
 }
 
-#ifdef CV_TEST_HOOKS
-std::atomic<int32_t> g_cut_after_ms{-1};
-esp_timer_handle_t g_cut_timer = nullptr;
-
-void cut_timer_cb(void*) { test_cut_miso(true); }
-
-// Called as a backup write or read starts.
-void arm_cut() {
-    int32_t ms = g_cut_after_ms.exchange(-1);
-    if (ms < 0) return;
-    if (ms == 0) {
-        test_cut_miso(true);
-        return;
-    }
-    if (!g_cut_timer) {
-        esp_timer_create_args_t args = {};
-        args.callback = cut_timer_cb;
-        args.name = "sd_cut";
-        if (esp_timer_create(&args, &g_cut_timer) != ESP_OK) return;
-    }
-    esp_timer_stop(g_cut_timer);
-    esp_timer_start_once(g_cut_timer, uint64_t(ms) * 1000);
-}
-#else
-inline void arm_cut() {}
-#endif
 }  // namespace
 
 #ifdef CV_TEST_HOOKS
 void test_cut_miso(bool cut) {
-    esp_rom_gpio_connect_in_signal(cut ? GPIO_MATRIX_CONST_ONE_INPUT : uint32_t(kMiso), FSPIQ_IN_IDX,
-                                   false);
+    std::lock_guard<std::mutex> lock(g_cut_mutex);
+    if (g_cut_timer) esp_timer_stop(g_cut_timer);
+    g_cut_pending = false;
+    g_cut = cut;
+    apply_cut();
 }
 void test_cut_after_ms(int32_t ms) {
+    std::lock_guard<std::mutex> lock(g_cut_mutex);
     if (g_cut_timer) esp_timer_stop(g_cut_timer);
+    g_cut_pending = false;
     g_cut_after_ms = ms;
 }
 #endif
@@ -142,9 +177,9 @@ std::vector<std::string> list_backups() {
 }
 
 bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
+    arm_cut();
     if (image.empty() || image.size() > kMaxFileSize) return false;
     if (!mount()) return false;
-    arm_cut();
     long number = next_backup_number(list_backups());
     if (number < 0) return false;
     // Never reuse a name that exists (even one list_backups did not show): a
@@ -168,8 +203,8 @@ bool write_backup(const std::vector<uint8_t>& image, std::string& name) {
 }
 
 bool read_backup(const std::string& name, std::vector<uint8_t>& out) {
-    if (!mount()) return false;
     arm_cut();
+    if (!mount()) return false;
     std::string path = std::string(kDir) + "/" + name;
     File f = SD.open(path.c_str(), FILE_READ);
     if (!f) return false;

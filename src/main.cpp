@@ -9,9 +9,7 @@
 #include "test_hooks.h"
 #include "ui/app.h"
 #include "ui/gfx.h"
-#ifdef CV_TEST_HOOKS
 #include "ui/sim_keyboard.h"
-#endif
 
 using namespace cv;
 using namespace cv::ui;
@@ -73,14 +71,7 @@ void handle_autolock(App& a, uint32_t now) {
 
 void setup() {
     auto cfg = M5.config();
-#ifdef CV_TEST_HOOKS
-    // The keyboard is started below with a reader that can add simulated keys;
-    // starting it twice would leave the first reader's interrupt pointing at freed memory.
-    M5Cardputer.begin(cfg, false);
-    install_sim_keyboard();
-#else
     M5Cardputer.begin(cfg, true);
-#endif
 #ifdef CV_SCREENSHOT
     Serial.begin(115200);
 #endif
@@ -154,11 +145,8 @@ void setup() {
 }
 
 void loop() {
-#ifdef CV_TEST_HOOKS
-    update_inputs();
-#else
     M5Cardputer.update();
-#endif
+    apply_sim_keys();  // test builds: simulated held keys (no-op in release)
     App& a = app();
     // Keys queued or held for the old screen must not reach the next one.
     auto navigate = [&a] {

@@ -46,14 +46,12 @@ _MATRIX = [
     ["ctrl", "opt", "alt"] + list(zip("zxcvbnm,./", "ZXCVBNM<>?")) + ["space"],
 ]
 KEYPOS = {}      # key name -> (x, y); a printable key is named by its unshifted character
-SHIFTED = {}     # shifted character -> (x, y)
 PRINTABLE = []   # (name, unshifted, shifted) for every key that types a character
 for _y, _row in enumerate(_MATRIX):
     assert len(_row) == 14, _row
     for _x, _k in enumerate(_row):
         if isinstance(_k, tuple):
             KEYPOS[_k[0]] = (_x, _y)
-            SHIFTED[_k[1]] = (_x, _y)
             PRINTABLE.append((_k[0], _k[0], _k[1]))
         else:
             KEYPOS[_k] = (_x, _y)
@@ -1799,6 +1797,21 @@ def wait_message(d, titles, timeout=60):
     raise Fail(f"no {titles} message within {timeout} s; last state: {last}")
 
 
+def backup_now(d):
+    """Settings > Backup to SD with the P3 passphrase; returns the file name."""
+    open_setting(d, ROW_BACKUP)
+    d.screen("text_input", "Backup passphrase", timeout=15)
+    d.type(P3)
+    d.key("enter")
+    d.screen("text_input", "Confirm passphrase")
+    d.type(P3)
+    d.key("enter")
+    st = d.screen("message", "Backup saved", timeout=60)
+    name = backup_name_in(st)
+    d.key("enter")
+    return name
+
+
 def restore_menu_names(d):
     """Open Settings > Restore from SD and return the backup names, newest first."""
     open_setting(d, ROW_RESTORE)
@@ -1835,11 +1848,12 @@ def t29_sd_pulled(d):
         if d.state()["screen"] == "unlock":
             d.unlock(pw)
         before = d.dump()
-        known = set(restore_menu_names(d))  # backups already on the card
+        backup_now(d)  # a good backup, so the card is never empty ("No backups")
+        known = set(restore_menu_names(d))  # backups on the card before any pull
         go_home(d)
 
         # Restore: card pulled with the list on screen, before a file is read.
-        names = restore_menu_names(d)
+        restore_menu_names(d)
         d.cmd("sdcut on")
         d.key("enter")
         finish_failed(("Restore", "SD card not readable"))
@@ -1908,16 +1922,18 @@ def t29_sd_pulled(d):
         check(d.dump() == before, "a pulled card changed the vault")
 
         # And the card still works: backup, change the vault, restore it.
-        open_setting(d, ROW_BACKUP)
-        d.screen("text_input", "Backup passphrase", timeout=15)
-        d.type(P3)
+        good = backup_now(d)
+        new_entry(d, "Note")
+        set_title(d, "After pulls")
+        d.key("down")
         d.key("enter")
-        d.screen("text_input", "Confirm passphrase")
-        d.type(P3)
-        d.key("enter")
-        st = d.screen("message", "Backup saved", timeout=60)
-        good = backup_name_in(st)
-        d.key("enter")
+        d.screen("text_input", "Text")
+        d.type("temp")
+        d.key("tab")
+        d.screen("entry_edit")
+        save_entry(d)
+        d.screen("entry_view")
+        check(len(d.dump()) == len(before) + 1, "note not added")
         names = restore_menu_names(d)
         check(names[0] == good, f"newest backup not first: {names}")
         d.key("enter")
@@ -1955,7 +1971,15 @@ def main():
             continue
         t0 = time.time()
         try:
-            fn(d)
+            try:
+                fn(d)
+            finally:
+                # A scenario that stopped half way must not leave a simulated
+                # key held for the next one.
+                try:
+                    d.cmd("keys", timeout=5)
+                except Exception:
+                    pass
             passed += 1
             print(f"PASS {fn.__name__} ({time.time() - t0:.1f}s)", flush=True)
         except Skip as e:
