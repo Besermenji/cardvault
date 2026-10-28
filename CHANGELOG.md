@@ -19,6 +19,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
   in `docs/support/addresses.env`; `tools/support.py` (run in CI and before every release) checks their checksums, the QR codes
   and every copy.
 
+### Changed
+- README rewritten in a plainer voice and emojis removed from the docs and the bug template (#75).
+  The facts and numbers are the same, plus the boot splash from #74 (hero image, cover, a note
+  under *Using it*). Warnings keep their emphasis as bold text or a plain **Warning:** lead-in.
+  CI now fails when the README links a screenshot that is not in the repository.
+
 ### Fixed
 - Secret hygiene (#39). A revealed secret hides again after 20 s, when the screen dims and when you
   come back to the entry; ENTER on a secret row reveals just that row and does nothing on
