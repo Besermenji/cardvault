@@ -1,6 +1,6 @@
-# Hardening notes (research — not a procedure)
+# Hardening notes (research, not a procedure)
 
-> ⚠️ **Do not burn eFuses based on this page.** eFuse changes are permanent. A mistake can make your
+> **Warning: do not burn eFuses based on this page.** eFuse changes are permanent. A mistake can make your
 > Cardputer impossible to reflash, or erase your vault. This page records the analysis behind
 > issue #23. A tested, step-by-step procedure will replace it once it has been verified on a spare
 > device.

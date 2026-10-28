@@ -4,7 +4,7 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: "⚠️ Never paste real secrets, passphrases or vault files here. For security issues use private vulnerability reporting instead."
+      value: "Never paste real secrets, passphrases or vault files here. For security issues use private vulnerability reporting instead."
   - type: input
     id: version
     attributes:

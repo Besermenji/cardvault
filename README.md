@@ -1,12 +1,17 @@
 # CardVault
 
-**An offline, encrypted secrets vault firmware for the M5Stack Cardputer ADV.**
+Offline, encrypted secrets vault firmware for the M5Stack Cardputer ADV.
 
-Keep BIP39 seed phrases, passwords, 2FA (TOTP) secrets and private notes on your Cardputer,
-encrypted with a passphrase only you know. No Wi-Fi. No Bluetooth. No cloud.
+<p align="center">
+  <img src="docs/screenshots/splash.png" width="480" alt="CardVault boot screen: a vault door dial, the name and the tagline">
+</p>
 
-> ⚠️ **Early software (v0.x).** Always keep an independent backup (paper/metal) of any seed phrase.
-> Read the [threat model](#security-model) before trusting CardVault with real funds.
+CardVault keeps BIP39 seed phrases, passwords, 2FA (TOTP) secrets and private notes on your
+Cardputer, encrypted with a passphrase only you know. It never turns on Wi-Fi or Bluetooth and has
+no cloud component.
+
+This is early software (v0.x). Keep an independent backup (paper or metal) of any seed phrase, and
+read the [security model](#security-model) before trusting CardVault with real funds.
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="240" alt="Home: list of secrets">
@@ -18,49 +23,63 @@ encrypted with a passphrase only you know. No Wi-Fi. No Bluetooth. No cloud.
 
 ## Features
 
-| | |
-|---|---|
-| 🔐 **Encryption** | Argon2id key derivation (tuned to ~2 s per guess *on the device*; a computer guesses much faster, see the [security model](#security-model)) + XChaCha20-Poly1305 via [Monocypher](https://monocypher.org) |
-| 🧠 **BIP39 helper** | Type seed words with autocomplete (4 letters are always enough), checksum validation, generate new 12/24-word seeds with the hardware RNG, view words page by page |
-| 🔑 **Password generator** | Random characters or BIP39-word passphrases, unbiased sampling, entropy shown |
-| ⏱️ **2FA codes** | RFC 6238 TOTP (6/8 digits, 30/60 s) with a live overview of all your codes |
-| 💾 **SD backups** | Encrypted, verified backups to `/cardvault/*.cvb` on the microSD card, restorable on any Cardputer |
-| 🛡️ **Brute-force guard** | On the device: escalating delays; **10 wrong passphrases in a row erase the vault** (it does not limit guessing on a copy of the data) |
-| 🙈 **Privacy** | Secrets masked until you hold <kbd>Space</kbd> (revealed ones hide again after 20 s or on dimming), auto-lock with dimming, typed passphrases wiped when the lock screen idles, <kbd>G0</kbd> side button locks instantly |
-| 📡 **Air-gapped** | The firmware never turns on Wi-Fi or Bluetooth (the radio drivers come with the Arduino framework and are linked in, but are never started) |
+- Encryption: XChaCha20-Poly1305 via [Monocypher](https://monocypher.org), with the key derived from
+  your passphrase by Argon2id. The derivation is tuned to about 2 s per guess on the device; a
+  computer guesses much faster (see the [security model](#security-model)).
+- Seed phrases: type words with autocomplete (four letters are always enough), checksum validation,
+  generate new 12 or 24 word seeds with the hardware RNG, view the words page by page.
+- Password generator: random characters or BIP39-word passphrases, unbiased sampling, entropy shown.
+- 2FA codes: RFC 6238 TOTP (6 or 8 digits, 30 or 60 s) with a live overview of all your codes.
+- SD backups: encrypted, verified backups to `/cardvault/*.cvb` on the microSD card, restorable on
+  any Cardputer.
+- Attempt limit on the device: escalating delays, and 10 wrong passphrases in a row erase the vault.
+  This does not limit guessing on a copy of the data.
+- Privacy: secrets are masked until you hold <kbd>Space</kbd>, and revealed ones hide again after
+  20 s or when the screen dims. The device auto-locks with dimming, typed passphrases are wiped when
+  the lock screen idles, and the <kbd>G0</kbd> side button locks it instantly.
+- No radios: the firmware never turns on Wi-Fi or Bluetooth. The radio drivers come with the Arduino
+  framework and are linked in, but are never started.
 
 ## Install
 
-**Web flasher (easiest):** open the CardVault web flasher (GitHub Pages of this repo) in Chrome/Edge,
-put the Cardputer in download mode (power off, hold <kbd>G0</kbd>, plug USB-C) and click *Install*.
+### Web flasher
 
-**esptool:** download `cardvault-vX.Y.Z-cardputer-adv.bin` from
+Open the CardVault web flasher (GitHub Pages of this repo) in Chrome or Edge, put the Cardputer in
+download mode (power off, hold <kbd>G0</kbd>, plug in USB-C) and click *Install*.
+
+### esptool
+
+Download `cardvault-vX.Y.Z-cardputer-adv.bin` from
 [Releases](https://github.com/Besermenji/cardvault/releases), check its SHA-256, then:
 
 ```sh
 esptool.py --chip esp32s3 write_flash 0x0 cardvault-vX.Y.Z-cardputer-adv.bin
 ```
 
-**M5Burner:** search for *CardVault* in M5Burner's Cardputer section.
+### M5Burner
 
-**Next to other firmware (Launcher):** flash [Launcher](https://github.com/bmorcelli/Launcher), copy
-`cardvault-vX.Y.Z-cardputer-adv.bin` to the SD card and install it from Launcher's SD menu. How
-Launcher behaves is Launcher's business, not CardVault's: this is what CardVault is built for with
-Launcher 2.9.1 (it reads the partition table in the image and creates a `vault` storage area), but it
-has **not yet been verified on hardware** ([#28](https://github.com/Besermenji/cardvault/issues/28)).
-CardVault only ever uses its own `vault` partition. Press <kbd>Enter</kbd>/<kbd>G0</kbd> while booting
-to get back to Launcher and switch firmware.
+Search for *CardVault* in M5Burner's Cardputer section.
 
-On the first start after installing through Launcher, CardVault asks to **set up its storage area**. Say
-**Y**: it only formats CardVault's own `vault` area and **doesn't touch Launcher or any other firmware**
-installed on the device.
+### Next to other firmware (Launcher)
 
-> ⚠️ Any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter,
-> and could log your passphrase if it is the firmware you boot. Only install firmware you trust next to
-> it, use a strong passphrase, and keep SD backups. Removing CardVault in Launcher may delete its
-> storage area.
+Flash [Launcher](https://github.com/bmorcelli/Launcher), copy `cardvault-vX.Y.Z-cardputer-adv.bin`
+to the SD card and install it from Launcher's SD menu. How Launcher behaves is Launcher's business,
+not CardVault's. CardVault is built for Launcher 2.9.1 (it reads the partition table in the image
+and creates a `vault` storage area), but this has not been verified on hardware yet
+([#28](https://github.com/Besermenji/cardvault/issues/28)). CardVault only ever uses its own `vault`
+partition. Press <kbd>Enter</kbd> or <kbd>G0</kbd> while booting to get back to Launcher and switch
+firmware.
 
-**From source:**
+On the first start after installing through Launcher, CardVault asks to set up its storage area.
+Answer **Y**. It only formats CardVault's own `vault` area and does not touch Launcher or any other
+firmware on the device.
+
+Any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter, and
+could log your passphrase if it is the firmware you boot. Only install firmware you trust next to
+it, use a strong passphrase, and keep SD backups. Removing CardVault in Launcher may delete its
+storage area.
+
+### From source
 
 ```sh
 pio run -e cardputer -t upload
@@ -79,32 +98,50 @@ pio run -e cardputer -t upload
 | hold <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>R</kbd> | Peek at the selected secret / reveal that row / reveal all (hides again after 20 s) |
 | <kbd>G0</kbd> (side button) | Lock immediately |
 
-1. **First boot** — create a passphrase (twice). Use something long: five or more random words is ideal.
-2. **Add secrets** — <kbd>Tab</kbd> → *New secret* → Seed phrase, Password, 2FA or Note.
-3. **Seed phrases** — choose 12/18/24 words, type the first letters of each word and press
-   <kbd>Enter</kbd>; CardVault checks the BIP39 checksum when you finish.
-4. **2FA** — paste the *setup key* (base32) shown next to the QR code. Set the clock once per power-up
-   (Settings → Set clock, UTC): the Cardputer ADV has no battery-backed clock.
-5. **Backups** — Settings → *Backup to SD*. You choose a passphrase for the backup. **A backup file is
-   guessable offline**: anyone who gets a copy can try passphrases on a computer with no attempt limit,
-   at the same Argon2 cost as the vault. Give it its own long random passphrase; reusing the vault
-   passphrase turns every copy of the file into a second way to attack it. The same goes for the
-   safety copy that *Compact vault* writes (step 6): it is an ordinary backup under the **vault**
-   passphrase, so delete it from the card on a computer once the compaction is done and the vault
-   opens, or treat the card as being as sensitive as the device.
-   Restore with Settings → *Restore from SD* (also available on the lock screen via <kbd>Tab</kbd>).
-   Backups are numbered (`backup-0001.cvb`, ...) and never overwrite each other; the newest is listed first.
-6. **Compact vault** — Settings → *Compact vault*. Flash keeps old encrypted copies of the vault after
-   every save, including, after a passphrase change or restore, a copy that the **old** passphrase still
-   opens. Compact first saves a verified safety copy to SD (it opens with your vault passphrase), then
-   erases the vault storage and writes the current vault back. It needs an SD card, and it is offered
-   automatically after a passphrase change or restore. Keep the power on while it runs; if the rewrite
-   fails, the device will not lock until the vault is saved again. Afterwards the card holds
-   `backup-000N.cvb` under the vault passphrase (see step 5).
+A short splash with the vault dial is shown at power-on. Any key skips it.
+
+### First boot
+
+Create a passphrase and type it twice. Use something long: five or more random words is a good
+choice.
+
+### Adding secrets
+
+Press <kbd>Tab</kbd>, choose *New secret*, then Seed phrase, Password, 2FA or Note.
+
+For a seed phrase, choose 12, 18 or 24 words, type the first letters of each word and press
+<kbd>Enter</kbd>. CardVault checks the BIP39 checksum when you finish.
+
+For 2FA, paste the setup key (base32) shown next to the QR code. Set the clock once per power-up
+(Settings > Set clock, UTC), because the Cardputer ADV has no battery-backed clock.
+
+### Backups
+
+Use Settings > *Backup to SD*. You choose a passphrase for the backup. **A backup file can be
+guessed offline.** Anyone who gets a copy can try passphrases on a computer with no attempt limit, at
+the same Argon2 cost as the vault. Give it its own long random passphrase: reusing the vault
+passphrase turns every copy of the file into a second way to attack it. The same goes for the safety
+copy that *Compact vault* writes (see below). It is an ordinary backup under the vault passphrase,
+so delete it from the card on a computer once the compaction is done and the vault opens, or treat
+the card as being as sensitive as the device.
+
+Restore with Settings > *Restore from SD* (also available on the lock screen via <kbd>Tab</kbd>).
+Backups are numbered (`backup-0001.cvb`, ...) and never overwrite each other. The newest is listed
+first.
+
+### Compact vault
+
+Flash keeps old encrypted copies of the vault after every save, including, after a passphrase change
+or restore, a copy that the old passphrase still opens. Settings > *Compact vault* first saves a
+verified safety copy to SD (it opens with your vault passphrase), then erases the vault storage and
+writes the current vault back. It needs an SD card, and it is offered automatically after a
+passphrase change or restore. Keep the power on while it runs. If the rewrite fails, the device will
+not lock until the vault is saved again. Afterwards the card holds `backup-000N.cvb` under the vault
+passphrase (see Backups).
 
 ## Security model
 
-**How your data is protected**
+### How your data is protected
 
 - A random 256-bit data key encrypts the vault with **XChaCha20-Poly1305**. The data key is wrapped by a
   key derived from your passphrase with **Argon2id**. Memory is the largest free heap block minus a
@@ -126,7 +163,7 @@ pio run -e cardputer -t upload
 - Randomness comes from the ESP32-S3 hardware RNG with its ADC entropy source enabled, mixed with
   keystroke timing through a ratcheting BLAKE2b pool.
 
-**What it does NOT protect against**
+### What it does not protect against
 
 - **Offline guessing of SD backups.** A backup is only protected by its passphrase (see *Backups*
   above); the attempt limit does not apply to a file you can copy.
@@ -146,7 +183,7 @@ pio run -e cardputer -t upload
 
 See [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
-### Vault file format (v1)
+## Vault file format (v1)
 
 ```
 header (104 B): "CVLT" | ver | kdf=2 | rsvd | mem_kib u32 | passes u32 | salt[16]
@@ -164,17 +201,20 @@ pio run -e cardputer      # firmware
 tools/merge_bin.sh 0.1.0  # single image in release/
 ```
 
-**Screenshots** (dummy data only!): flash `pio run -e cardputer-e2e -t upload` (with no SD card in), then run
-`python3 tools/screenshots.py /dev/cu.usbmodem* --yes` (needs `pyserial`). It erases the e2e test vault, adds made-up
-entries, drives the real UI to each main screen and writes the PNGs in `docs/screenshots/` (including
-`cover.png` for M5Burner). For a one-off capture of any screen, flash `pio run -e cardputer-debug -t upload`, run
+Screenshots (dummy data only): flash `pio run -e cardputer-e2e -t upload` (with no SD card in), then
+run `python3 tools/screenshots.py /dev/cu.usbmodem* --yes` (needs `pyserial`). It erases the e2e test
+vault, adds made-up entries, drives the real UI to each main screen and writes the PNGs in
+`docs/screenshots/` (including `splash.png`, which is also saved as `cover.png` for M5Burner). For a
+one-off capture of any screen, flash `pio run -e cardputer-debug -t upload`, run
 `python3 tools/screenshot.py /dev/cu.usbmodem*` and press <kbd>ctrl</kbd>+<kbd>S</kbd> on the device.
-Neither the e2e nor the debug build is a release build; the hotkey exists only in the debug build, which runs on the test partition table (its vault
-partition has a different label) with its own settings, so it cannot open a real vault and always starts with an
-empty demo vault. CI checks that release images don't contain it.
+Neither the e2e nor the debug build is a release build. The hotkey exists only in the debug build,
+which runs on the test partition table (its vault partition has a different label) with its own
+settings, so it cannot open a real vault and always starts with an empty demo vault. CI checks that
+release images don't contain it.
 
 Layout: `src/crypto`, `src/vault`, `src/features`, `src/security` are Arduino-free and unit tested;
-`src/platform` talks to the hardware; `src/ui` holds the screens, styled as described in [DESIGN.md](DESIGN.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
+`src/platform` talks to the hardware; `src/ui` holds the screens, styled as described in
+[DESIGN.md](DESIGN.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Support
 
