@@ -21,6 +21,13 @@ jobs:
 
       - name: DESIGN.md is valid and matches theme.h and layout.h
         run: python3 tools/check_design_sync.py
+      - name: Every image the README shows is in the repository
+        run: |
+          missing=0
+          for f in $(grep -o 'docs/screenshots/[A-Za-z0-9_-]*\.png' README.md | sort -u); do
+            [ -f "$f" ] || { echo "README links $f, which does not exist"; missing=1; }
+          done
+          exit $missing
 
   build:
     runs-on: ubuntu-latest

@@ -10,8 +10,8 @@ CardVault keeps BIP39 seed phrases, passwords, 2FA (TOTP) secrets and private no
 Cardputer, encrypted with a passphrase only you know. It never turns on Wi-Fi or Bluetooth and has
 no cloud component.
 
-This is early software (v0.x). Keep an independent backup (paper or metal) of any seed phrase, and
-read the [security model](#security-model) before trusting CardVault with real funds.
+**Early software (v0.x).** Always keep an independent backup (paper or metal) of any seed phrase,
+and read the [security model](#security-model) before trusting CardVault with real funds.
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="240" alt="Home: list of secrets">
@@ -32,8 +32,8 @@ read the [security model](#security-model) before trusting CardVault with real f
 - 2FA codes: RFC 6238 TOTP (6 or 8 digits, 30 or 60 s) with a live overview of all your codes.
 - SD backups: encrypted, verified backups to `/cardvault/*.cvb` on the microSD card, restorable on
   any Cardputer.
-- Attempt limit on the device: escalating delays, and 10 wrong passphrases in a row erase the vault.
-  This does not limit guessing on a copy of the data.
+- Attempt limit on the device: escalating delays, and **10 wrong passphrases in a row erase the
+  vault**. This does not limit guessing on a copy of the data.
 - Privacy: secrets are masked until you hold <kbd>Space</kbd>, and revealed ones hide again after
   20 s or when the screen dims. The device auto-locks with dimming, typed passphrases are wiped when
   the lock screen idles, and the <kbd>G0</kbd> side button locks it instantly.
@@ -65,16 +65,16 @@ Search for *CardVault* in M5Burner's Cardputer section.
 Flash [Launcher](https://github.com/bmorcelli/Launcher), copy `cardvault-vX.Y.Z-cardputer-adv.bin`
 to the SD card and install it from Launcher's SD menu. How Launcher behaves is Launcher's business,
 not CardVault's. CardVault is built for Launcher 2.9.1 (it reads the partition table in the image
-and creates a `vault` storage area), but this has not been verified on hardware yet
+and creates a `vault` storage area), but this has **not yet been verified on hardware**
 ([#28](https://github.com/Besermenji/cardvault/issues/28)). CardVault only ever uses its own `vault`
 partition. Press <kbd>Enter</kbd> or <kbd>G0</kbd> while booting to get back to Launcher and switch
 firmware.
 
-On the first start after installing through Launcher, CardVault asks to set up its storage area.
-Answer **Y**. It only formats CardVault's own `vault` area and does not touch Launcher or any other
-firmware on the device.
+On the first start after installing through Launcher, CardVault asks to **set up its storage area**.
+Answer **Y**. It only formats CardVault's own `vault` area and **doesn't touch Launcher or any other
+firmware** on the device.
 
-Any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter, and
+**Warning:** any other firmware you run can read CardVault's (encrypted) vault and reset its attempt counter, and
 could log your passphrase if it is the firmware you boot. Only install firmware you trust next to
 it, use a strong passphrase, and keep SD backups. Removing CardVault in Launcher may delete its
 storage area.
@@ -121,7 +121,7 @@ Use Settings > *Backup to SD*. You choose a passphrase for the backup. **A backu
 guessed offline.** Anyone who gets a copy can try passphrases on a computer with no attempt limit, at
 the same Argon2 cost as the vault. Give it its own long random passphrase: reusing the vault
 passphrase turns every copy of the file into a second way to attack it. The same goes for the safety
-copy that *Compact vault* writes (see below). It is an ordinary backup under the vault passphrase,
+copy that *Compact vault* writes (see below). It is an ordinary backup under the **vault** passphrase,
 so delete it from the card on a computer once the compaction is done and the vault opens, or treat
 the card as being as sensitive as the device.
 
@@ -132,7 +132,7 @@ first.
 ### Compact vault
 
 Flash keeps old encrypted copies of the vault after every save, including, after a passphrase change
-or restore, a copy that the old passphrase still opens. Settings > *Compact vault* first saves a
+or restore, a copy that the **old** passphrase still opens. Settings > *Compact vault* first saves a
 verified safety copy to SD (it opens with your vault passphrase), then erases the vault storage and
 writes the current vault back. It needs an SD card, and it is offered automatically after a
 passphrase change or restore. Keep the power on while it runs. If the rewrite fails, the device will
