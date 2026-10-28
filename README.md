@@ -198,7 +198,7 @@ The payload is a compact TLV list of entries (`src/vault/serializer.h`).
 ```sh
 pio test -e native        # host unit tests: crypto vectors, BIP39, TOTP, vault format, guard
 pio run -e cardputer      # firmware
-tools/merge_bin.sh 0.1.0  # single image in release/
+tools/merge_bin.sh 0.2.0  # single image in release/
 ```
 
 Screenshots (dummy data only): flash `pio run -e cardputer-e2e -t upload` (with no SD card in), then

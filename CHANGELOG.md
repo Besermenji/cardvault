@@ -20,10 +20,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
   and every copy.
 
 ### Changed
+- Version 0.2.0, the first release since 0.1.0-rc1 (#79).
 - README rewritten in a plainer voice and emojis removed from the docs and the bug template (#75).
   The facts and numbers are the same, plus the boot splash from #74 (hero image, cover, a note
   under *Using it*). Warnings keep their emphasis as bold text or a plain **Warning:** lead-in.
   CI now fails when the README links a screenshot that is not in the repository.
+- The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
+  gone, so CardVault no longer shares storage with other firmware installed with Launcher. Other
+  firmware can still read the encrypted vault and reset the attempt counter.
+- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware. On upgrade
+  from v0.1.0-rc1 the settings (auto-lock, brightness) go back to their defaults once.
 
 ### Fixed
 - Secret hygiene (#39). A revealed secret hides again after 20 s, when the screen dims and when you
@@ -53,13 +59,6 @@ and the project uses [Semantic Versioning](https://semver.org/).
   is bounded and reports "SD card not readable". The card now uses the same SPI wiring as M5's
   Cardputer example. Backups never overwrite an older file, sort numerically past 9999, and the
   card is released after every backup, restore or cancel.
-
-### Changed
-- The vault only ever uses its own `vault` partition. The fallback to the shared `spiffs` partition is
-  gone, so CardVault no longer shares storage with other firmware installed with Launcher. Other
-  firmware can still read the encrypted vault and reset the attempt counter.
-- NVS namespaces renamed to `cv_guard` / `cv_cfg` to avoid collisions with other firmware. On upgrade
-  from v0.1.0-rc1 the settings (auto-lock, brightness) go back to their defaults once.
 
 ### Security
 - Release and CI hardening (#40). The release check (`tools/check_release_image.sh`) runs on the
