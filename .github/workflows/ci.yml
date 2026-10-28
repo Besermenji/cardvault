@@ -9,18 +9,18 @@ permissions:
   contents: read
 
 jobs:
-  # Its own job so the design.md CLI (npm) never blocks the firmware tests and build.
+  # Its own job, so a DESIGN.md problem never hides a firmware test or build failure (or the reverse).
   design:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          node-version: "22.14.0"
+          python-version: "3.11"
 
-      - name: DESIGN.md lints and matches theme.h and layout.h
-        run: tools/lint_design.sh
+      - name: DESIGN.md is valid and matches theme.h and layout.h
+        run: python3 tools/check_design_sync.py
 
   build:
     runs-on: ubuntu-latest

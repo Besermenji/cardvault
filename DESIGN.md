@@ -128,7 +128,8 @@ components:
 The source of truth is [`src/ui/theme.h`](src/ui/theme.h) (colours, fonts) and
 [`src/ui/layout.h`](src/ui/layout.h) (geometry, glyph sizes). Drawing helpers live in
 [`src/ui/gfx.cpp`](src/ui/gfx.cpp). This file describes them for people and agents who add screens;
-change it in the same commit as those files. `tools/lint_design.sh` (run in CI) fails when the colours,
+change it in the same commit as those files. `tools/check_design_sync.py` (run in CI) fails when the front
+matter is malformed or a `{token}` reference is broken, when a contrast figure below is wrong, or when the colours,
 the font names, the screen geometry (`kW`, `kH`, `kHeaderH`, `kFooterH`, `kBodyY`, `kBodyH`) or the glyph cells
 here differ from the headers. Component sizes, radii and row heights are kept by hand.
 
@@ -164,10 +165,10 @@ in `cv::ui::color`, never a raw literal.
 
 Contrast on the RGB565 values, computed from the WCAG formula: `text` on `bg`, `panel` and `sel` is at least
 11:1 and every state colour on `bg` or `panel` is at least 5.2:1. `dim` is 5.4:1 on `bg` and 4.6:1 on `panel`,
-so hints and labels pass AA there. The linter, which works on the hex values above before the RGB565
-rounding, reports `dim` on `panel` as 4.49:1 (a warning, not an error); what the screen shows is 4.63:1.
-**Known limit:** `dim` on `sel` is 3.6:1 and `bad` on `sel` is 4.1:1, so do
-not put `dim` or `bad` text on a selected row; use `text`.
+so hints and labels pass AA there. On the hex values above, before the RGB565 rounding, `dim` on `panel` would
+be 4.49:1; what the screen shows is 4.63:1. **Known limit:** `dim` on `sel` is 3.6:1 and `bad` on `sel` is
+4.1:1, so do not put `dim` or `bad` text on a selected row; use `text`. `tools/check_design_sync.py` checks
+these figures.
 
 ## Typography
 

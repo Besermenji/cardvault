@@ -1,9 +1,0 @@
-{
-  "name": "cardvault-design-lint",
-  "private": true,
-  "description": "Pinned design.md CLI for tools/lint_design.sh. Not part of the firmware.",
-  "engines": { "node": ">=18" },
-  "devDependencies": {
-    "@google/design.md": "0.4.0"
-  }
-}
