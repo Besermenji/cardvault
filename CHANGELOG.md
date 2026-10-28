@@ -101,8 +101,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Documentation
 - `DESIGN.md` describes the on-device UI (colours, fonts, the 240x135 grid, components, rules for new
-  screens) in the design.md format (#66). `tools/check_design_sync.py` (run in CI) checks its colours, fonts,
-  geometry and glyph cells against `src/ui/theme.h` and `layout.h`.
+  screens) in the design.md format (#66). `tools/check_design_sync.py` (run in CI) validates its front
+  matter and token references, checks the quoted contrast ratios, and checks its colours, fonts, geometry and glyph
+  cells against `src/ui/theme.h` and `layout.h`.
 - The security docs now say what is and is not protected (#41). SD backups can be guessed offline
   with no attempt limit (README no longer suggests reusing the vault passphrase for them); the Argon2
   cost is ~2 s on the device only (about 120 guesses/s on one Apple M1 core) and only lightly

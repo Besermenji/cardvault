@@ -5,4 +5,3 @@
 !release/*.bin
 release/
 __pycache__/
-node_modules/
