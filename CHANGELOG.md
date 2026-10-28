@@ -6,6 +6,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-28
+
 ### Added
 - Boot splash (#74): a vault-door dial turns and settles, with the name, tagline and version, for
   1.5 s at power-on. Any key skips it and is not typed into the passphrase prompt. Locking and
@@ -156,3 +158,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Auto-lock with dimming, G0 instant lock, hold-to-reveal secrets.
 - Encrypted SD backup and restore with read-back verification.
 - Host unit tests, CI, release pipeline with merged image and web flasher.
+
+[Unreleased]: https://github.com/Besermenji/cardvault/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Besermenji/cardvault/compare/v0.1.0-rc1...v0.2.0
+[0.1.0-rc1]: https://github.com/Besermenji/cardvault/releases/tag/v0.1.0-rc1
