@@ -21,10 +21,21 @@
 #error "CV_REVEAL_MS must be at least 1000"
 #endif
 
+// How long the boot splash stays up unless a key ends it. Test builds only
+// may change it (the e2e build keeps it long enough for the harness to see it).
+#ifndef CV_SPLASH_MS
+#define CV_SPLASH_MS 1500
+#elif !defined(CV_TEST_HOOKS)
+#error "CV_SPLASH_MS may only be set together with CV_TEST_HOOKS"
+#elif CV_SPLASH_MS < 1000
+#error "CV_SPLASH_MS must be at least 1000"
+#endif
+
 namespace cv {
 namespace ui {
 
 constexpr uint32_t kRevealMs = CV_REVEAL_MS;
+constexpr uint32_t kSplashMs = CV_SPLASH_MS;
 
 struct App {
     VaultSession session;
@@ -97,6 +108,11 @@ struct MenuItem {
     bool destructive = false;  // digit hotkey only selects it; ENTER runs it
 };
 
+// The vault dial at `progress` 0..1 (turning), `settled` once it has clicked into place.
+void draw_splash(Canvas& c, float progress, bool settled);
+// Boot splash: shows the dial from `start_ms`, then replaces itself with next(). Any key
+// ends it early and is not passed on. `next_name` is the screen's name, for test builds.
+ScreenPtr make_splash(uint32_t start_ms, const char* next_name, std::function<ScreenPtr()> next);
 ScreenPtr make_setup();
 ScreenPtr make_unlock();
 ScreenPtr make_home();

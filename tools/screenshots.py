@@ -6,8 +6,9 @@
 
 This ERASES the e2e test vault (the "cvtvault" partition, never a real vault), creates a new one with
 made-up entries (public test vectors only), drives the real UI to each main screen and saves a PNG of
-each. Secrets stay masked: nothing is revealed. The clock is set to a fixed time before every capture so
-re-runs differ only in the battery icon and the generated password on the generator screen.
+each, starting with the boot splash (also the M5Burner cover). Secrets stay masked: nothing is
+revealed. The clock is set to a fixed time before every capture so re-runs differ only in the battery
+icon and the generated password on the generator screen.
 
 Needs pyserial (PlatformIO's Python has it) and no SD card.
 """
@@ -31,12 +32,14 @@ CLOCK += (10 - CLOCK % 30) % 30
 SCALE = 2  # README images; the cover is 1:1
 
 
-def capture(d, out, name, cover=False):
+def capture(d, out, name, cover=False, still=False):
     """Save the screen as <name>.png (enlarged for the README) and, with
-    `cover`, also as cover.png at 1:1 (M5Burner)."""
-    d.wake()
-    d.wait(lambda s: not s["toast"], "no toast on screen")
-    d.cmd(f"settime {CLOCK}")
+    `cover`, also as cover.png at 1:1 (M5Burner). `still`: the screen has no
+    clock and takes no key (the boot splash), so nothing is woken or set."""
+    if not still:
+        d.wake()
+        d.wait(lambda s: not s["toast"], "no toast on screen")
+        d.cmd(f"settime {CLOCK}")
     w, h, rows = d.shot()
     for path, scale in [(out / f"{name}.png", SCALE)] + ([(out / "cover.png", 1)] if cover else []):
         screenshot.write_png(path, w, h, rows, scale)
@@ -67,7 +70,13 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     d = run.Device(args.port)
+    d.skip_splash = False
     d.restart_cmd("factory")
+    # The boot splash (the e2e build keeps it up for 8 s). It is the cover.
+    d.wait(lambda s: s["screen"] == "splash" and run.info(s)["anim"] == "1",
+           "boot splash, dial settled (slow USB reconnect? run again)")
+    capture(d, out, "splash", cover=True, still=True)
+    d.skip_splash = True
     d.screen("setup")
 
     # Made-up content: t02 creates the vault, t03/t04/t07/t08 add a note, a seed phrase
@@ -85,7 +94,7 @@ def main():
     d.unlock(run.P1)
 
     run.go_home(d)
-    capture(d, out, "home", cover=True)
+    capture(d, out, "home")
 
     run.open_entry(d, "Email")
     capture(d, out, "entry")

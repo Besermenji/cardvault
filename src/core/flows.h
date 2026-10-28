@@ -30,6 +30,17 @@ enum class BootRoute {
 BootRoute boot_route(bool has_partition, bool guard_ok, bool mounted, bool guard_exhausted,
                      bool vault_exists);
 
+// ---- Splash ---------------------------------------------------------------
+
+// The vault dial turns for this long, then the frame holds still until the splash ends.
+constexpr uint32_t kSplashAnimMs = 800;
+
+// Eased progress of the dial, 0..1: ease-out, monotonic, 1 from kSplashAnimMs on.
+float splash_anim(uint32_t elapsed_ms);
+
+// The splash ends when its time is up or the user pressed a key.
+bool splash_done(uint32_t elapsed_ms, uint32_t total_ms, bool key_pressed);
+
 // ---- Wipe -------------------------------------------------------------------
 
 struct WipeResult {

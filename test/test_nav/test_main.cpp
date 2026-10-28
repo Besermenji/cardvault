@@ -1039,6 +1039,29 @@ void test_lock_destroys_all_screens_and_wipes_session() {
     TEST_ASSERT_EQUAL(0, r.depth());
 }
 
+void test_splash_anim() {
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, splash_anim(0));
+    TEST_ASSERT_EQUAL_FLOAT(1.0f, splash_anim(kSplashAnimMs));
+    TEST_ASSERT_EQUAL_FLOAT(1.0f, splash_anim(kSplashAnimMs + 5000));
+    TEST_ASSERT_EQUAL_FLOAT(1.0f, splash_anim(UINT32_MAX));
+    float prev = 0;
+    for (uint32_t t = 0; t <= kSplashAnimMs; t += 10) {
+        float p = splash_anim(t);
+        TEST_ASSERT_TRUE(p >= prev && p <= 1.0f);
+        prev = p;
+    }
+    // Ease-out: more than half way after half the time.
+    TEST_ASSERT_TRUE(splash_anim(kSplashAnimMs / 2) > 0.5f);
+}
+
+void test_splash_done() {
+    TEST_ASSERT_FALSE(splash_done(0, 1500, false));
+    TEST_ASSERT_FALSE(splash_done(1499, 1500, false));
+    TEST_ASSERT_TRUE(splash_done(1500, 1500, false));
+    TEST_ASSERT_TRUE(splash_done(0, 1500, true));
+    TEST_ASSERT_TRUE(splash_done(100, 1500, true));
+}
+
 void test_autolock_step() {
     const uint32_t limit = 60000, dim = 10000;
     // Locked screens: nothing until idle for the limit, then clear once and stay dim.
@@ -1144,6 +1167,8 @@ int main() {
     RUN_TEST(test_compact_storage_failures_keep_session_open);
     RUN_TEST(test_persist_before_lock_is_a_no_op_normally);
     RUN_TEST(test_lock_destroys_all_screens_and_wipes_session);
+    RUN_TEST(test_splash_anim);
+    RUN_TEST(test_splash_done);
     RUN_TEST(test_autolock_step);
     RUN_TEST(test_reveal_expiry_tolerates_clock_read_before_reveal);
     RUN_TEST(test_hold_peek_limits_and_conceal);
