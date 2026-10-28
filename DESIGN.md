@@ -234,6 +234,13 @@ progress bar is a pill (radius = half its height). Bars (header, footer) are squ
   SPACE peeks, R reveals everything, ENTER on a row reveals just that row; a revealed secret hides again
   after 20 s or when the screen dims.
 - **Progress bar** (`progress`): `line` pill with a coloured fill (TOTP countdown, calibration).
+- **Splash** (`draw_splash`, `make_splash`): the first screen after power-on, with no header, footer, clock
+  or battery. A vault-door dial (radius 46, centred 56 px from the left) sits on the left: a `panel` ring
+  with 24 tick marks that turn 90 degrees with an ease-out over 800 ms, four spokes, a hub and four bolts.
+  While it turns the bolts and hub are `dim`; once it has settled they are `accent`. On the right are the
+  name in `title`, a 40x2 px `accent` rule, the tagline in `small` on `dim` and the version at the bottom right. The splash
+  ends after 1.5 s or on any key; that key is not passed on. It only appears at boot: locking and
+  unlocking go straight to the next screen.
 
 ## Do's and Don'ts
 

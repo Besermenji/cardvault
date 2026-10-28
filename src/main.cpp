@@ -90,7 +90,9 @@ void setup() {
                         uint32_t(heap_caps_get_free_size(MALLOC_CAP_8BIT))};
     rng_stir(seed, sizeof seed);
 
-    clear(g_canvas);
+    // The first frame of the boot splash goes up before the storage checks.
+    uint32_t boot_ms = millis();
+    draw_splash(g_canvas, 0, false);
     g_canvas.pushSprite(0, 0);
 
     bool guard_ok = a.guard_kv.begin();
@@ -106,26 +108,32 @@ void setup() {
     switch (boot_route(has_partition, guard_ok, mounted, guard_ok && a.guard.exhausted(),
                        mounted && a.store.exists())) {
         case BootRoute::NoPartition:
-            a.router.reset(make_message(
-                "No vault partition",
-                "This install has no 'vault' partition. Flash the full CardVault image, or "
-                "install the CardVault .bin with Launcher so its partition table is used.",
-                color::bad));
+            a.router.reset(make_splash(boot_ms, "message", [] {
+                return make_message(
+                    "No vault partition",
+                    "This install has no 'vault' partition. Flash the full CardVault image, or "
+                    "install the CardVault .bin with Launcher so its partition table is used.",
+                    color::bad);
+            }));
             break;
         case BootRoute::GuardUnavailable:
-            a.router.reset(make_message(msg::kGuardUnavailableTitle, msg::kGuardUnavailable,
-                                        color::bad));
+            a.router.reset(make_splash(boot_ms, "message", [] {
+                return make_message(msg::kGuardUnavailableTitle, msg::kGuardUnavailable,
+                                    color::bad);
+            }));
             break;
         case BootRoute::StorageUnreadable:
             // Never format a non-blank partition silently: it may hold a damaged
             // vault or another app's data.
-            a.router.reset(make_confirm(msg::kStorageSetupTitle, msg::kStorageSetup,
-                                        [] {
-                                            app().busy("Setting up...");
-                                            app().store.format();
-                                            ESP.restart();
-                                        },
-                                        color::warn));
+            a.router.reset(make_splash(boot_ms, "confirm", [] {
+                return make_confirm(msg::kStorageSetupTitle, msg::kStorageSetup,
+                                    [] {
+                                        app().busy("Setting up...");
+                                        app().store.format();
+                                        ESP.restart();
+                                    },
+                                    color::warn);
+            }));
             break;
         case BootRoute::Wipe:
             // The counter reached the limit (possibly with power cut during the
@@ -134,8 +142,12 @@ void setup() {
             // it is our own "vault" partition, and an exhausted counter means
             // its contents must go, so no confirmation is asked.
             a.wipe_and_reboot(msg::kWipeResume);
-        case BootRoute::Unlock: a.router.reset(make_unlock()); break;
-        case BootRoute::Setup: a.router.reset(make_setup()); break;
+        case BootRoute::Unlock:
+            a.router.reset(make_splash(boot_ms, "unlock", [] { return make_unlock(); }));
+            break;
+        case BootRoute::Setup:
+            a.router.reset(make_splash(boot_ms, "setup", [] { return make_setup(); }));
+            break;
     }
     a.router.apply();
     a.last_input_ms = millis();

@@ -162,6 +162,16 @@ void lock_session(ui::Router& router, VaultSession& session, ui::ScreenPtr unloc
     router.reset(std::move(unlock_screen));
 }
 
+float splash_anim(uint32_t elapsed_ms) {
+    if (elapsed_ms >= kSplashAnimMs) return 1.0f;
+    float rest = 1.0f - float(elapsed_ms) / float(kSplashAnimMs);
+    return 1.0f - rest * rest * rest;
+}
+
+bool splash_done(uint32_t elapsed_ms, uint32_t total_ms, bool key_pressed) {
+    return key_pressed || elapsed_ms >= total_ms;
+}
+
 AutolockAction autolock_step(bool unlocked, bool dimmed, uint32_t idle_ms, uint32_t limit_ms,
                              uint32_t dim_before_ms) {
     if (!unlocked) {

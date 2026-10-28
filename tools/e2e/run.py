@@ -82,6 +82,10 @@ class Device:
         self.noise = []  # serial lines that are not replies (boot output, stray prints)
         self.fragments = []  # tails of reply lines cut by a reconnect (harness traffic)
         self.fresh = False  # no complete line read since the port was opened
+        # The boot splash stays up for CV_SPLASH_MS (8 s in this build) unless a key ends
+        # it. Scenarios want the screen behind it, so state() ends it; t30 and
+        # tools/screenshots.py turn this off to look at the splash itself.
+        self.skip_splash = True
         self.typed = set()  # every string of 4+ characters sent with `type` (see secrets())
         self.connect()
 
@@ -203,7 +207,13 @@ class Device:
     # -- helpers -----------------------------------------------------------------
 
     def state(self):
-        return json.loads(self.cmd("state"))
+        st = json.loads(self.cmd("state"))
+        if st["screen"] == "splash" and self.skip_splash:
+            # Esc: harmless if the splash ends by itself just before it arrives
+            # (it clears typed text on the unlock screen and does nothing on setup).
+            self.cmd("key esc")
+            st = json.loads(self.cmd("state"))
+        return st
 
     def dump(self):
         """The unlocked session's entries (RAM only: says nothing about flash)."""
@@ -1656,6 +1666,34 @@ def t27_screenshot_hook(d):
     after = d.state()
     check((after["screen"], after["title"], after["depth"]) ==
           (before["screen"], before["title"], before["depth"]), f"shot changed the screen: {after}")
+
+
+def t30_boot_splash(d):
+    """The splash comes first after every boot, ends by itself or on any key, and
+    the key that ends it does not reach the screen behind."""
+    d.skip_splash = False
+    try:
+        fails = d.state()["fails"]
+        d.restart_cmd("reboot")
+        st = d.screen("splash")
+        check(info(st)["next"] == "unlock", f"splash should lead to the unlock screen: {st}")
+        st = d.screen("unlock", timeout=15)  # no key sent: it ends on its own
+        check(st["depth"] == 1 and st["fails"] == fails and not st["open"],
+              f"after the splash: {st}")
+
+        d.restart_cmd("reboot")
+        st = d.wait(lambda s: s["screen"] == "splash" and info(s)["anim"] == "1",
+                    "splash dial settled")
+        w, h, rows = d.shot()
+        colours = {row[i:i + 4] for row in rows for i in range(0, len(row), 4)}
+        check((w, h) == (240, 135) and len(colours) >= 5, f"splash frame looks wrong: {len(colours)} colours")
+        check(len(set(rows[:18])) > 1, "splash has no dial on its top band")
+        d.cmd("key a")  # ends it; must not be typed into the passphrase
+        st = d.screen("unlock", timeout=5)
+        check(info(st)["len"] == "0" and st["fails"] == fails,
+              f"the key that ended the splash was not swallowed: {st}")
+    finally:
+        d.skip_splash = True
 
 
 def t28_keyboard_matrix(d):

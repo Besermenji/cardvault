@@ -7,6 +7,10 @@ and the project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Boot splash (#74): a vault-door dial turns and settles, with the name, tagline and version, for
+  1.5 s at power-on. Any key skips it and is not typed into the passphrase prompt. Locking and
+  unlocking are unchanged. It is also the M5Burner cover now (`tools/screenshots.py` captures it);
+  e2e t30 covers the timing and the swallowed key.
 - Screenshots in the README and an M5Burner cover (#19). `tools/screenshots.py` drives a Cardputer
   running the e2e build through the real UI with made-up data and saves a PNG of each main screen;
   the e2e build got a `shot` command for it (e2e t27). Release images are unchanged.
