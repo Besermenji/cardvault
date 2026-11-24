@@ -6,6 +6,17 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Backups with a saved password (#84). Settings > *Backup to SD* now asks how to protect the backup:
+  *Use saved password* picks a Password entry from the vault (entries under 8 characters are listed
+  as "too short" and can't be used), *Type a passphrase* works as before. A confirmation says that the
+  password also sits inside the backup, so keep a copy off the device. *Restore from SD* offers the
+  same choice while the vault is unlocked; on the lock and setup screens the passphrase is still typed.
+  e2e t31 covers it; existing SD scenarios go through the new menu.
+
+### Changed
+- Entries with the same title now keep a stable order on the home list (oldest first).
+
 ## [0.2.0] - 2026-10-28
 
 ### Added

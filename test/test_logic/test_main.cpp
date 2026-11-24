@@ -7,6 +7,7 @@
 #include <initializer_list>
 #include <string>
 
+#include "core/backup_key.h"
 #include "core/backup_names.h"
 #include "core/entry_rules.h"
 #include "core/messages.h"
@@ -14,6 +15,7 @@
 #include "platform/device.h"
 #include "ui/layout.h"
 #include "ui/textwrap.h"
+#include "vault/format.h"
 
 using namespace cv;
 using namespace cv::ui;
@@ -493,6 +495,116 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }
 
+// ---- Saved password as backup passphrase (#84) ------------------------------
+
+static uint32_t add_entry(VaultData& d, EntryType t, const char* title, uint8_t key,
+                          const SString& value) {
+    Entry e;
+    e.type = t;
+    e.title = title;
+    e.set(key, value);
+    return d.add(e);
+}
+
+void test_entry_title_less_ignores_case_then_uses_id() {
+    Entry a, b;
+    a.title = "bank";
+    b.title = "Bank";
+    a.id = 2;
+    b.id = 1;
+    TEST_ASSERT_TRUE(entry_title_less(b, a));  // same title: lower id first
+    TEST_ASSERT_FALSE(entry_title_less(a, b));
+    b.title = "apple";
+    TEST_ASSERT_TRUE(entry_title_less(b, a));
+    b.title = "BANKING";
+    TEST_ASSERT_TRUE(entry_title_less(a, b));  // a prefix sorts first
+    TEST_ASSERT_FALSE(entry_title_less(a, a));
+}
+
+void test_backup_key_choices_lists_password_entries_in_home_order() {
+    VaultData d;
+    uint32_t zed = add_entry(d, EntryType::Password, "zed", kFieldPassword, "correct horse");
+    add_entry(d, EntryType::Note, "a note", kFieldBody, "not a password at all");
+    uint32_t seven = add_entry(d, EntryType::Password, "Alpha", kFieldPassword, "1234567");
+    uint32_t eight = add_entry(d, EntryType::Password, "beta", kFieldPassword, "12345678");
+    uint32_t blank = add_entry(d, EntryType::Password, "Beta", kFieldPassword, "          ");
+    uint32_t longest = add_entry(d, EntryType::Password, "max", kFieldPassword,
+                                 SString(kMaxPassphraseLen, 'x'));
+    uint32_t too_long = add_entry(d, EntryType::Password, "MAX", kFieldPassword,
+                                  SString(kMaxPassphraseLen + 1, 'x'));
+    add_entry(d, EntryType::Totp, "otp", kFieldTotpSecret, "JBSWY3DPEHPK3PXP");
+
+    auto c = backup_key_choices(d);
+    TEST_ASSERT_EQUAL(6, int(c.size()));
+    uint32_t want_ids[] = {seven, eight, blank, longest, too_long, zed};
+    bool want_usable[] = {false, true, false, true, false, true};
+    for (int i = 0; i < 6; i++) {
+        TEST_ASSERT_EQUAL_UINT32(want_ids[i], c[i].id);
+        TEST_ASSERT_EQUAL(want_usable[i], c[i].usable);
+    }
+    TEST_ASSERT_EQUAL_STRING("Alpha", c[0].title.c_str());
+    TEST_ASSERT_EQUAL(0, int(backup_key_choices(VaultData()).size()));
+}
+
+void test_backup_key_from_entry() {
+    VaultData d;
+    const SString verbatim = "  two  spaces \xc3\xa9 ";  // stored and used exactly as typed
+    uint32_t pw = add_entry(d, EntryType::Password, "key", kFieldPassword, verbatim);
+    uint32_t short_pw = add_entry(d, EntryType::Password, "short", kFieldPassword, "hunter2");
+    uint32_t note = add_entry(d, EntryType::Note, "note", kFieldBody, "a long enough note text");
+
+    SString out = "left over";
+    TEST_ASSERT_EQUAL(int(BackupKey::Ok), int(backup_key_from_entry(d, pw, true, out)));
+    TEST_ASSERT_TRUE(out == verbatim);
+
+    TEST_ASSERT_EQUAL(int(BackupKey::Weak), int(backup_key_from_entry(d, short_pw, true, out)));
+    TEST_ASSERT_TRUE(out.empty());
+    // A restore lets restore_check decide: only an empty value is refused.
+    TEST_ASSERT_EQUAL(int(BackupKey::Ok), int(backup_key_from_entry(d, short_pw, false, out)));
+    TEST_ASSERT_EQUAL_STRING("hunter2", out.c_str());
+
+    TEST_ASSERT_EQUAL(int(BackupKey::Missing), int(backup_key_from_entry(d, note, false, out)));
+    TEST_ASSERT_TRUE(out.empty());
+    TEST_ASSERT_EQUAL(int(BackupKey::Missing), int(backup_key_from_entry(d, 9999, true, out)));
+
+    Entry no_field;  // a Password entry without its field (never saved, but be safe)
+    no_field.type = EntryType::Password;
+    no_field.title = "empty";
+    uint32_t empty = d.add(no_field);
+    TEST_ASSERT_EQUAL(int(BackupKey::Weak), int(backup_key_from_entry(d, empty, false, out)));
+}
+
+void test_saved_password_messages_fit_the_screen() {
+    // The longest title any entry can have, cut the way settings.cpp cuts it.
+    SString title = fit(SString(200, 'W'), msg::kEntryTitleCols);
+    char buf[240];
+    snprintf(buf, sizeof buf, msg::kSavedPassConfirm, title.c_str());
+    TEST_ASSERT_TRUE_MESSAGE(int(wrap(buf, strlen(buf), msg::kDialogCols).size()) <=
+                                 msg::kDialogMaxLines,
+                             buf);
+    TEST_ASSERT_TRUE(strlen(buf) < 200);  // settings.cpp formats into char[200]
+    snprintf(buf, sizeof buf, msg::kBackupSavedEntry, "backup-99999999.cvb", title.c_str());
+    TEST_ASSERT_TRUE_MESSAGE(int(wrap(buf, strlen(buf), msg::kDialogCols).size()) <=
+                                 msg::kDialogMaxLines,
+                             buf);
+    TEST_ASSERT_TRUE(strlen(buf) < 160);  // and these into char[160]
+    snprintf(buf, sizeof buf, msg::kBackupSavedTyped, "backup-99999999.cvb");
+    TEST_ASSERT_TRUE(int(wrap(buf, strlen(buf), msg::kDialogCols).size()) <= msg::kDialogMaxLines);
+    TEST_ASSERT_TRUE(strlen(buf) < 160);
+    for (const char* m : {msg::kNoSavedPass, msg::kNoSavedPassRestore})
+        TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <=
+                                     msg::kDialogMaxLines,
+                                 m);
+    for (const char* t : {msg::kPassSourceTitle, msg::kChoosePassTitle, msg::kNoSavedPassTitle,
+                          msg::kUseSavedPass})
+        TEST_ASSERT_TRUE(strlen(t) <= 20);
+    // Menu labels: 22 mono columns, fewer next to a detail such as "99 saved".
+    for (const char* l : {msg::kUseSavedPass, msg::kTypeNewPass, msg::kTypeOldPass}) {
+        int room = (kW - 10 - int(strlen("99 saved") + 1) * kSmallW - 20) / kMonoW;
+        TEST_ASSERT_TRUE_MESSAGE(int(strlen(l)) <= room, l);
+    }
+}
+
 void test_backup_names_parse_strictly() {
     TEST_ASSERT_EQUAL(1, backup_number("backup-0001.cvb"));
     TEST_ASSERT_EQUAL(10000, backup_number("backup-10000.cvb"));
@@ -583,5 +695,9 @@ int main() {
     RUN_TEST(test_field_value_empty_and_defining_field);
     RUN_TEST(test_is_blank);
     RUN_TEST(test_entry_content_equal);
+    RUN_TEST(test_entry_title_less_ignores_case_then_uses_id);
+    RUN_TEST(test_backup_key_choices_lists_password_entries_in_home_order);
+    RUN_TEST(test_backup_key_from_entry);
+    RUN_TEST(test_saved_password_messages_fit_the_screen);
     return UNITY_END();
 }

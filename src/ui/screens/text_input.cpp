@@ -1,4 +1,5 @@
 // Single-line and multi-line text editor, optionally masked.
+#include <algorithm>
 #include <cmath>
 
 #include "core/entry_rules.h"
@@ -212,6 +213,11 @@ public:
             if (i) out += "|";
             out += items_[i].label.c_str();
         }
+        out += " details=";
+        for (size_t i = 0; i < items_.size(); i++) {
+            if (i) out += "|";
+            out += items_[i].detail.c_str();
+        }
     }
 #endif
     MenuScreen(const char* title, std::vector<MenuItem> items)
@@ -256,7 +262,13 @@ public:
             char num[4];
             snprintf(num, sizeof num, "%d", idx + 1);
             text_small(c, 9, y + 5, idx < 9 ? num : " ");
-            text_mono(c, 20, y, fit(items_[idx].label, 22).c_str(), items_[idx].color);
+            // A detail on the right takes columns from the label, so they never overlap.
+            int cols = 22;
+            if (!items_[idx].detail.empty()) {
+                int room = kW - 10 - int(items_[idx].detail.size() + 1) * kSmallW - 20;
+                cols = std::min(cols, room / kMonoW);
+            }
+            text_mono(c, 20, y, fit(items_[idx].label, cols).c_str(), items_[idx].color);
             if (!items_[idx].detail.empty()) {
                 c.setFont(CV_FONT_SMALL);
                 c.setTextColor(color::dim);

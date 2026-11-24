@@ -125,9 +125,17 @@ copy that *Compact vault* writes (see below). It is an ordinary backup under the
 so delete it from the card on a computer once the compaction is done and the vault opens, or treat
 the card as being as sensitive as the device.
 
+Instead of typing a passphrase twice, you can choose *Use saved password* and pick a **Password**
+entry from the vault, for example one made with the password generator. Its password becomes the
+backup passphrase. Entries shorter than 8 characters are listed but can't be used. **That password is
+stored inside the backup, so the backup alone can't tell you what it is.** Keep a copy somewhere
+other than this device (on paper, or in another password manager). Without it the backup can't be
+restored if the device is lost.
+
 Restore with Settings > *Restore from SD* (also available on the lock screen via <kbd>Tab</kbd>).
-Backups are numbered (`backup-0001.cvb`, ...) and never overwrite each other. The newest is listed
-first.
+While the vault is unlocked you can again pick a saved password, or type the passphrase. On the lock
+and setup screens you always type it. Backups are numbered (`backup-0001.cvb`, ...) and never overwrite
+each other. The newest is listed first.
 
 ### Compact vault
 
