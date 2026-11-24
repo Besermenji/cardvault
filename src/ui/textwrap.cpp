@@ -72,8 +72,13 @@ size_t cursor_move_line(const std::vector<Line>& lines, size_t cur, int cols, in
 
 SString fit(const SString& s, int cols) {
     if (int(s.size()) <= cols) return s;
-    if (cols <= 3) return s.substr(0, cols);
-    return s.substr(0, cols - 3) + "...";
+    size_t n = size_t(cols <= 3 ? cols : cols - 3);
+    // Never keep half a UTF-8 sequence: back up while the first byte left
+    // out is a continuation byte (10xxxxxx).
+    while (n > 0 && (uint8_t(s[n]) & 0xC0) == 0x80) n--;
+    SString out = s.substr(0, n);
+    if (cols > 3) out += "...";
+    return out;
 }
 
 }  // namespace ui

@@ -220,14 +220,19 @@ public:
         }
     }
 #endif
-    MenuScreen(const char* title, std::vector<MenuItem> items)
-        : title_(title), items_(std::move(items)) {}
+    MenuScreen(const char* title, std::vector<MenuItem> items, int sel,
+               std::function<void()> on_back)
+        : title_(title), items_(std::move(items)), on_back_(std::move(on_back)) {
+        if (sel > 0 && sel < int(items_.size())) sel_ = sel;
+    }
 
     void on_key(const Key& k) override {
         invalidate();
         int n = int(items_.size());
         if (k.back()) {
+            auto back = on_back_;
             app().router.pop();
+            if (back) back();
         } else if (k.up()) {
             sel_ = (sel_ + n - 1) % n;
         } else if (k.down()) {
@@ -284,6 +289,7 @@ public:
 private:
     const char* title_;
     std::vector<MenuItem> items_;
+    std::function<void()> on_back_;
     int sel_ = 0;
     int first_ = 0;
 };
@@ -336,8 +342,9 @@ ScreenPtr make_text_input(const char* title, const SString& initial, InputOpts o
     return ScreenPtr(new TextInputScreen(title, initial, opts, std::move(done)));
 }
 
-ScreenPtr make_menu(const char* title, std::vector<MenuItem> items) {
-    return ScreenPtr(new MenuScreen(title, std::move(items)));
+ScreenPtr make_menu(const char* title, std::vector<MenuItem> items, int sel,
+                    std::function<void()> on_back) {
+    return ScreenPtr(new MenuScreen(title, std::move(items), sel, std::move(on_back)));
 }
 
 ScreenPtr make_confirm(const char* title, const char* msg, std::function<void()> yes,

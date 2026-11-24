@@ -83,6 +83,9 @@ constexpr const char* kTypeNewPass = "Type a passphrase";
 constexpr const char* kTypeOldPass = "Type the passphrase";
 constexpr const char* kChoosePassTitle = "Choose password";
 constexpr const char* kTooShort = "too short";
+constexpr const char* kTooLong = "too long";
+constexpr const char* kOnlySpaces = "only spaces";
+constexpr const char* kEntryNotFound = "Password entry not found";
 constexpr const char* kNoSavedPassTitle = "No saved passwords";
 constexpr const char* kNoSavedPass =
     "The vault has no Password entries. Add one, or choose \"Type a passphrase\".";

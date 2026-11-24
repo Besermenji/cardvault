@@ -246,6 +246,14 @@ void test_fit() {
     TEST_ASSERT_EQUAL_STRING("short", fit("short", 10).c_str());
     TEST_ASSERT_EQUAL_STRING("a very...", fit("a very long title", 9).c_str());
     TEST_ASSERT_EQUAL_STRING("ab", fit("abcdef", 2).c_str());
+    // Never cut inside a UTF-8 sequence ("\xc3\xbc" is u-umlaut, 2 bytes;
+    // "\xe2\x82\xac" is the euro sign, 3 bytes).
+    TEST_ASSERT_EQUAL_STRING("Z...", fit("Z\xc3\xbcrich bank", 5).c_str());
+    TEST_ASSERT_EQUAL_STRING("Z\xc3\xbc...", fit("Z\xc3\xbcrich bank", 6).c_str());
+    TEST_ASSERT_EQUAL_STRING("a...", fit("a\xe2\x82\xac\xe2\x82\xac", 6).c_str());
+    TEST_ASSERT_EQUAL_STRING("a\xe2\x82\xac...", fit("a\xe2\x82\xac\xe2\x82\xacxyz", 7).c_str());
+    TEST_ASSERT_EQUAL_STRING("", fit("\xc3\xbc\xc3\xbc", 1).c_str());
+    TEST_ASSERT_EQUAL_STRING("\xc3\xbc", fit("\xc3\xbc\xc3\xbc", 3).c_str());
 }
 
 // ---- Entry rules ------------------------------------------------------------
@@ -536,14 +544,40 @@ void test_backup_key_choices_lists_password_entries_in_home_order() {
 
     auto c = backup_key_choices(d);
     TEST_ASSERT_EQUAL(6, int(c.size()));
+    using P = BackupKeyProblem;
     uint32_t want_ids[] = {seven, eight, blank, longest, too_long, zed};
-    bool want_usable[] = {false, true, false, true, false, true};
+    P want[] = {P::Short, P::None, P::Blank, P::None, P::Long, P::None};
     for (int i = 0; i < 6; i++) {
         TEST_ASSERT_EQUAL_UINT32(want_ids[i], c[i].id);
-        TEST_ASSERT_EQUAL(want_usable[i], c[i].usable);
+        TEST_ASSERT_EQUAL(int(want[i]), int(c[i].problem));
+        TEST_ASSERT_EQUAL(want[i] == P::None, c[i].usable());
     }
     TEST_ASSERT_EQUAL_STRING("Alpha", c[0].title.c_str());
     TEST_ASSERT_EQUAL(0, int(backup_key_choices(VaultData()).size()));
+}
+
+void test_backup_key_problem_matches_the_passphrase_policy() {
+    using P = BackupKeyProblem;
+    struct Case {
+        SString pass;
+        P want;
+    } cases[] = {
+        {"", P::Short},
+        {"    ", P::Short},  // length is checked first, like check_new_passphrase
+        {"1234567", P::Short},
+        {"12345678", P::None},
+        {" \t\r\n \t\r\n", P::Blank},
+        {"\v\v\v\v\v\v\v\v", P::None},  // only ' ', \t, \r, \n count as blank
+        {SString(kMaxPassphraseLen, ' '), P::Blank},
+        {SString(kMaxPassphraseLen, 'x'), P::None},
+        {SString(kMaxPassphraseLen + 1, 'x'), P::Long},
+        {SString(4000, 'x'), P::Long},
+    };
+    for (auto& c : cases) {
+        TEST_ASSERT_EQUAL(int(c.want), int(backup_key_problem(c.pass)));
+        // Never disagrees with the policy the vault core enforces.
+        TEST_ASSERT_EQUAL(c.want == P::None, check_new_passphrase(c.pass) == VaultError::Ok);
+    }
 }
 
 void test_backup_key_from_entry() {
@@ -697,6 +731,7 @@ int main() {
     RUN_TEST(test_entry_content_equal);
     RUN_TEST(test_entry_title_less_ignores_case_then_uses_id);
     RUN_TEST(test_backup_key_choices_lists_password_entries_in_home_order);
+    RUN_TEST(test_backup_key_problem_matches_the_passphrase_policy);
     RUN_TEST(test_backup_key_from_entry);
     RUN_TEST(test_saved_password_messages_fit_the_screen);
     return UNITY_END();

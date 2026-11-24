@@ -27,7 +27,7 @@ void cursor_locate(const std::vector<Line>& lines, size_t cur, int cols, int& li
 // possible. Returns `cur` unchanged at the first/last line.
 size_t cursor_move_line(const std::vector<Line>& lines, size_t cur, int cols, int delta);
 
-// Truncates with "..." so it fits in `cols` characters.
+// Truncates with "..." so it fits in `cols` bytes, never inside a UTF-8 sequence.
 SString fit(const SString& s, int cols);
 
 }  // namespace ui

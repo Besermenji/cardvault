@@ -127,7 +127,8 @@ the card as being as sensitive as the device.
 
 Instead of typing a passphrase twice, you can choose *Use saved password* and pick a **Password**
 entry from the vault, for example one made with the password generator. Its password becomes the
-backup passphrase. Entries shorter than 8 characters are listed but can't be used. **That password is
+backup passphrase. A password must be 8 to 128 characters and not only spaces. Entries that don't
+meet this are listed with the reason ("too short", "too long" or "only spaces") and can't be used. **That password is
 stored inside the backup, so the backup alone can't tell you what it is.** Keep a copy somewhere
 other than this device (on paper, or in another password manager). Without it the backup can't be
 restored if the device is lost.
