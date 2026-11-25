@@ -74,6 +74,34 @@ constexpr const char* kCompactAfterRestore =
     "Flash still holds old copies of the replaced vault, which open with its passphrase. "
     "Compact now?";
 
+// Backup with a saved Password entry (#84). Entry titles in these texts are
+// cut to kEntryTitleCols so the longest still fits the dialog.
+constexpr int kEntryTitleCols = 16;
+constexpr const char* kPassSourceTitle = "Backup passphrase";
+constexpr const char* kUseSavedPass = "Use saved password";
+constexpr const char* kTypeNewPass = "Type a passphrase";
+constexpr const char* kTypeOldPass = "Type the passphrase";
+constexpr const char* kChoosePassTitle = "Choose password";
+constexpr const char* kTooShort = "too short";
+constexpr const char* kTooLong = "too long";
+constexpr const char* kOnlySpaces = "only spaces";
+constexpr const char* kEntryNotFound = "Password entry not found";
+constexpr const char* kNoSavedPassTitle = "No saved passwords";
+constexpr const char* kNoSavedPass =
+    "The vault has no Password entries. Add one, or choose \"Type a passphrase\".";
+constexpr const char* kNoSavedPassRestore =
+    "The vault has no Password entries. Choose \"Type the passphrase\".";
+// %s = entry title
+constexpr const char* kSavedPassConfirm =
+    "The backup will open with the password of \"%s\". That password is inside the backup too: "
+    "keep a copy off this device. Y to back up.";
+// %s = backup file name
+constexpr const char* kBackupSavedTyped =
+    "Saved /cardvault/%s (verified). You need the backup passphrase to restore it.";
+// %s = backup file name, %s = entry title
+constexpr const char* kBackupSavedEntry =
+    "Saved /cardvault/%s (verified). It opens with the password of \"%s\".";
+
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;
 

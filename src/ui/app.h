@@ -120,7 +120,10 @@ ScreenPtr make_entry_view(uint32_t id);
 ScreenPtr make_entry_edit(uint32_t id, EntryType type, const SString* prefill = nullptr);
 ScreenPtr make_text_input(const char* title, const SString& initial, InputOpts opts,
                           TextDone done);
-ScreenPtr make_menu(const char* title, std::vector<MenuItem> items);
+// `sel` is the row selected at first; `on_back` runs after Esc closed the menu
+// (e.g. to return to the menu that opened it).
+ScreenPtr make_menu(const char* title, std::vector<MenuItem> items, int sel = 0,
+                    std::function<void()> on_back = nullptr);
 ScreenPtr make_confirm(const char* title, const char* msg, std::function<void()> yes,
                        uint16_t accent = color::warn);
 ScreenPtr make_message(const char* title, const char* msg, uint16_t accent = color::info,

@@ -2,6 +2,7 @@
 #include <M5Cardputer.h>
 #include <esp_heap_caps.h>
 
+#include "core/backup_key.h"
 #include "core/flows.h"
 #include "core/messages.h"
 #include "platform/sd_backup.h"
@@ -255,10 +256,162 @@ private:
     int first_ = 0;
 };
 
+using SavedPassUse = std::function<void(uint32_t id, const SString& title)>;
+
+const char* problem_label(BackupKeyProblem p) {
+    switch (p) {
+        case BackupKeyProblem::Short: return msg::kTooShort;
+        case BackupKeyProblem::Long: return msg::kTooLong;
+        case BackupKeyProblem::Blank: return msg::kOnlySpaces;
+        case BackupKeyProblem::None: break;
+    }
+    return "";
+}
+
+// Lists the vault's Password entries to pick one as a backup passphrase (#84).
+// For a new backup, entries that break the passphrase policy show why and
+// picking one asks again, on the same row; for a restore, restore_check
+// decides. `back` reopens the menu this came from (Esc, or no entries), so
+// the choice to type the passphrase stays one key away.
+void choose_saved_password(bool for_backup, SavedPassUse use, std::function<void()> back,
+                           int sel = 0) {
+    App& a = app();
+    auto choices = backup_key_choices(a.session.data());
+    if (choices.empty()) {
+        a.router.push(make_message(msg::kNoSavedPassTitle,
+                                   for_backup ? msg::kNoSavedPass : msg::kNoSavedPassRestore,
+                                   color::warn, back));
+        return;
+    }
+    std::vector<MenuItem> items;
+    for (size_t i = 0; i < choices.size(); i++) {
+        const BackupKeyChoice& c = choices[i];
+        bool usable = c.usable() || !for_backup;
+        uint32_t id = c.id;
+        SString title = c.title;
+        int row = int(i);
+        std::function<void()> action;
+        if (usable) {
+            action = [use, id, title] { use(id, title); };
+        } else {
+            action = [use, back, row] {
+                app().toast(vault_error_str(VaultError::WeakPassphrase), color::warn, 2500);
+                choose_saved_password(true, use, back, row);
+            };
+        }
+        items.push_back({c.title, action, usable ? "" : problem_label(c.problem),
+                         usable ? color::text : color::dim});
+    }
+    a.router.push(make_menu(msg::kChoosePassTitle, std::move(items), sel, back));
+}
+
+// Copies the chosen entry's password into `pass`; on failure says why.
+bool saved_password(uint32_t id, bool for_backup, SString& pass) {
+    switch (backup_key_from_entry(app().session.data(), id, for_backup, pass)) {
+        case BackupKey::Ok:
+            return true;
+        case BackupKey::Weak:
+            app().toast(vault_error_str(for_backup ? VaultError::WeakPassphrase
+                                                   : VaultError::EmptyPassphrase),
+                        color::warn, 2500);
+            return false;
+        case BackupKey::Missing:
+            break;
+    }
+    app().toast(msg::kEntryNotFound, color::bad, 2500);
+    return false;
+}
+
+// "3 saved" / "none": how many Password entries the picker would list.
+SString saved_count() {
+    size_t n = 0;
+    for (const auto& e : app().session.data().entries)
+        if (e.type == EntryType::Password) n++;
+    if (n == 0) return "none";
+    char buf[16];
+    snprintf(buf, sizeof buf, "%u saved", unsigned(n));
+    return buf;
+}
+
 // Restore guesses count against the guard while a locked vault exists. On a
 // device without a vault (setup screen) there is nothing to protect, and a
 // missing counter would otherwise allow a single guess.
 bool restore_guarded() { return !app().session.is_open() && app().store.exists(); }
+
+void restore_with(std::shared_ptr<std::vector<uint8_t>> image, SString& pass) {
+    App& a = app();
+    bool locked = restore_guarded();
+    if (locked && attempt_delay_active()) return;
+    a.busy("Decrypting backup...");
+    RestoreCheck r = restore_check(a.guard, locked, *image, pass);
+    switch (r.kind) {
+        case RestoreCheck::MustWipe:
+            a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
+        case RestoreCheck::Refused:
+            a.toast("Storage error", color::bad);
+            return;
+        case RestoreCheck::Wrong:
+            if (locked) a.arm_attempt_delay();
+            a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
+            return;
+        case RestoreCheck::Failed:
+            if (locked && r.retry_delay_ms) a.arm_attempt_delay();
+            a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
+            return;
+        case RestoreCheck::Empty:
+            return;
+        case RestoreCheck::Ok:
+            break;
+    }
+    auto box = std::make_shared<SecretBox>(pass);
+    char msg[120];
+    snprintf(msg, sizeof msg,
+             "Replace the vault on this device with the backup (%u secrets)? The current "
+             "vault will be overwritten.",
+             unsigned(r.entries));
+    a.router.push(make_confirm("Replace vault?", msg, [image, box] {
+        App& a = app();
+        a.busy("Restoring...");
+        VaultError e = restore_commit(a.guard, a.session, a.store, *image, box->value);
+        if (e != VaultError::Ok) {
+            a.lock();
+            a.toast(vault_error_str(e), color::bad, 3000);
+            return;
+        }
+        a.router.reset(make_home());
+        // The replaced vault is still in flash and opens with its old passphrase.
+        a.router.push(make_confirm(msg::kCompactAfterRestoreTitle, msg::kCompactAfterRestore,
+                                   [] { run_compact(true); }, color::good));
+        if (a.guard.failures() > 0)
+            a.toast(msg::kCounterNotReset, color::warn, 3000);
+        else
+            a.toast("Backup restored");
+    }, color::bad));
+}
+
+void ask_restore_passphrase(std::shared_ptr<std::vector<uint8_t>> image) {
+    InputOpts o = existing_passphrase_opts("Passphrase used when this backup was made");
+    app().router.push(make_text_input("Backup passphrase", "", o,
+                                      [image](SString& pass) { restore_with(image, pass); }));
+}
+
+// While unlocked: pick a saved password or type the passphrase for `image`.
+void push_restore_source(std::shared_ptr<std::vector<uint8_t>> image) {
+    std::vector<MenuItem> items;
+    items.push_back({msg::kUseSavedPass,
+                     [image] {
+                         choose_saved_password(
+                             false,
+                             [image](uint32_t id, const SString&) {
+                                 SString pass;
+                                 if (saved_password(id, false, pass)) restore_with(image, pass);
+                             },
+                             [image] { push_restore_source(image); });
+                     },
+                     saved_count()});
+    items.push_back({msg::kTypeOldPass, [image] { ask_restore_passphrase(image); }});
+    app().router.push(make_menu(msg::kPassSourceTitle, std::move(items)));
+}
 
 void restore_from(const std::string& name) {
     auto image = std::make_shared<std::vector<uint8_t>>();
@@ -271,57 +424,64 @@ void restore_from(const std::string& name) {
     // restore_check() validates the file (before any attempt is counted).
     // While locked, restore guesses share the unlock screen's delay.
     if (restore_guarded() && attempt_delay_active()) return;
-    InputOpts o = existing_passphrase_opts("Passphrase used when this backup was made");
-    app().router.push(make_text_input("Backup passphrase", "", o, [image](SString& pass) {
-        App& a = app();
-        bool locked = restore_guarded();
-        if (locked && attempt_delay_active()) return;
-        a.busy("Decrypting backup...");
-        RestoreCheck r = restore_check(a.guard, locked, *image, pass);
-        switch (r.kind) {
-            case RestoreCheck::MustWipe:
-                a.wipe_and_reboot("10 wrong passphrases in a row. All data is being erased.");
-            case RestoreCheck::Refused:
-                a.toast("Storage error", color::bad);
-                return;
-            case RestoreCheck::Wrong:
-                if (locked) a.arm_attempt_delay();
-                a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
-                return;
-            case RestoreCheck::Failed:
-                if (locked && r.retry_delay_ms) a.arm_attempt_delay();
-                a.router.push(make_message("Restore failed", vault_error_str(r.error), color::bad));
-                return;
-            case RestoreCheck::Empty:
-                return;
-            case RestoreCheck::Ok:
-                break;
-        }
-        auto box = std::make_shared<SecretBox>(pass);
-        char msg[120];
-        snprintf(msg, sizeof msg,
-                 "Replace the vault on this device with the backup (%u secrets)? The current "
-                 "vault will be overwritten.",
-                 unsigned(r.entries));
-        a.router.push(make_confirm("Replace vault?", msg, [image, box] {
-            App& a = app();
-            a.busy("Restoring...");
-            VaultError e = restore_commit(a.guard, a.session, a.store, *image, box->value);
-            if (e != VaultError::Ok) {
-                a.lock();
-                a.toast(vault_error_str(e), color::bad, 3000);
-                return;
-            }
-            a.router.reset(make_home());
-            // The replaced vault is still in flash and opens with its old passphrase.
-            a.router.push(make_confirm(msg::kCompactAfterRestoreTitle, msg::kCompactAfterRestore,
-                                       [] { run_compact(true); }, color::good));
-            if (a.guard.failures() > 0)
-                a.toast(msg::kCounterNotReset, color::warn, 3000);
-            else
-                a.toast("Backup restored");
-        }, color::bad));
-    }));
+    if (app().session.is_open())
+        push_restore_source(image);
+    else
+        ask_restore_passphrase(image);  // locked or setup: no entries to pick from
+}
+
+// Encrypts the open vault under `pass`, writes it to SD and reports. `entry_title`
+// names the saved password used (already cut to fit), or is null when typed.
+void write_backup_with(const SString& pass, const char* entry_title) {
+    App& a = app();
+    a.busy("Encrypting backup...");
+    std::vector<uint8_t> image;
+    VaultError e = a.session.export_image(pass, a.session.header().kdf, image);
+    if (e != VaultError::Ok) {
+        a.router.push(make_message("Backup failed", vault_error_str(e), color::bad));
+        return;
+    }
+    a.busy("Writing to SD...");
+    std::string name;
+    bool ok = sd::write_backup(image, name);
+    sd::unmount();
+    if (!ok) {
+        show_sd_error("Backup failed", "Could not write to the SD card.");
+        return;
+    }
+    char msg[160];
+    if (entry_title)
+        snprintf(msg, sizeof msg, msg::kBackupSavedEntry, name.c_str(), entry_title);
+    else
+        snprintf(msg, sizeof msg, msg::kBackupSavedTyped, name.c_str());
+    a.router.push(make_message("Backup saved", msg, color::good));
+}
+
+// Pick a saved password or type a new passphrase; `hold` keeps the card
+// mounted until the backup is written or the flow is left.
+void push_backup_source(std::shared_ptr<sd::MountHold> hold) {
+    std::vector<MenuItem> items;
+    items.push_back({msg::kUseSavedPass, [hold] {
+                         choose_saved_password(
+                             true,
+                             [hold](uint32_t id, const SString& title) {
+                                 auto shown = std::make_shared<SString>(fit(title, msg::kEntryTitleCols));
+                                 char text[200];
+                                 snprintf(text, sizeof text, msg::kSavedPassConfirm, shown->c_str());
+                                 app().router.push(make_confirm(msg::kUseSavedPass, text, [hold, id, shown] {
+                                     // Looked up only now, so the copy lives just as long as the backup.
+                                     SString pass;
+                                     if (saved_password(id, true, pass)) write_backup_with(pass, shown->c_str());
+                                 }));
+                             },
+                             [hold] { push_backup_source(hold); });
+                     },
+                     saved_count()});
+    items.push_back({msg::kTypeNewPass, [hold] {
+                         ask_new_passphrase("Backup passphrase",
+                                            [hold](SString& pass) { write_backup_with(pass, nullptr); });
+                     }});
+    app().router.push(make_menu(msg::kPassSourceTitle, std::move(items)));
 }
 
 }  // namespace
@@ -335,32 +495,9 @@ void start_backup_flow() {
         show_no_card("Insert a FAT32 microSD card and try again.");
         return;
     }
-    // Stays mounted through the prompt; released when it completes or is
-    // cancelled (or the device locks).
-    auto hold = std::make_shared<sd::MountHold>();
-    ask_new_passphrase("Backup passphrase", [hold](SString& pass) {
-        App& a = app();
-        a.busy("Encrypting backup...");
-        std::vector<uint8_t> image;
-        VaultError e = a.session.export_image(pass, a.session.header().kdf, image);
-        if (e != VaultError::Ok) {
-            a.router.push(make_message("Backup failed", vault_error_str(e), color::bad));
-            return;
-        }
-        a.busy("Writing to SD...");
-        std::string name;
-        bool ok = sd::write_backup(image, name);
-        sd::unmount();
-        if (!ok) {
-            show_sd_error("Backup failed", "Could not write to the SD card.");
-            return;
-        }
-        char msg[140];
-        snprintf(msg, sizeof msg,
-                 "Saved /cardvault/%s (verified). You need the backup passphrase to restore it.",
-                 name.c_str());
-        a.router.push(make_message("Backup saved", msg, color::good));
-    });
+    // Stays mounted through the menus and prompts; released when the backup
+    // completes or is cancelled (or the device locks).
+    push_backup_source(std::make_shared<sd::MountHold>());
 }
 
 void start_restore_flow() {

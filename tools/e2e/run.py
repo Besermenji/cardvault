@@ -403,6 +403,23 @@ def open_setting(d, row):
     d.key("enter")
 
 
+def open_backup_prompt(d):
+    """Settings > Backup to SD > "Type a passphrase": the first passphrase prompt."""
+    open_setting(d, ROW_BACKUP)
+    st = d.screen("menu", "Backup passphrase", timeout=15)
+    check(info(st)["items"] == "Use saved password|Type a passphrase", f"backup menu: {st}")
+    d.menu_pick("Type a passphrase")
+    return d.screen("text_input", "Backup passphrase")
+
+
+def type_restore_passphrase(d):
+    """After picking a backup while unlocked: "Type the passphrase" opens the prompt."""
+    st = d.screen("menu", "Backup passphrase", timeout=15)
+    check(info(st)["items"] == "Use saved password|Type the passphrase", f"restore menu: {st}")
+    d.menu_pick("Type the passphrase")
+    return d.screen("text_input", "Backup passphrase")
+
+
 def empty_backup_passphrase_refused(d):
     """Regression #32: ENTER and TAB on an empty Backup passphrase only warn.
     No key is derived, no attempt is counted, the prompt stays open."""
@@ -928,8 +945,7 @@ def t19_sd_without_card(d):
 def t20_sd_backup_and_restore(d):
     need_card()
     before = d.dump()
-    open_setting(d, ROW_BACKUP)
-    d.screen("text_input", "Backup passphrase", timeout=15)
+    open_backup_prompt(d)
     d.type(P3)
     d.key("enter")
     d.screen("text_input", "Confirm passphrase")
@@ -957,6 +973,7 @@ def t20_sd_backup_and_restore(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
     d.key("enter")
+    type_restore_passphrase(d)
     empty_backup_passphrase_refused(d)  # unlocked
     d.type("not the backup pass")
     d.key("enter")
@@ -967,7 +984,7 @@ def t20_sd_backup_and_restore(d):
     d.key("enter")  # Restore from SD again (row still selected)
     d.screen("menu", "Choose backup", timeout=15)
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    type_restore_passphrase(d)
     d.type(P3)
     d.key("enter")
     d.screen("confirm", "Replace vault?", timeout=30)
@@ -1015,7 +1032,7 @@ def t21_sd_compact_with_safety_copy(d):
     st = d.screen("menu", "Choose backup", timeout=15)
     check(info(st)["items"].split("|")[0] == copy, f"safety copy not newest: {st}")
     d.key("enter")
-    d.screen("text_input", "Backup passphrase")
+    type_restore_passphrase(d)
     d.type(P3)
     d.key("enter")
     d.screen("confirm", "Replace vault?", timeout=30)
@@ -1846,8 +1863,7 @@ def wait_message(d, titles, timeout=60):
 
 def backup_now(d):
     """Settings > Backup to SD with the P3 passphrase; returns the file name."""
-    open_setting(d, ROW_BACKUP)
-    d.screen("text_input", "Backup passphrase", timeout=15)
+    open_backup_prompt(d)
     d.type(P3)
     d.key("enter")
     d.screen("text_input", "Confirm passphrase")
@@ -1906,8 +1922,7 @@ def t29_sd_pulled(d):
         finish_failed(("Restore", "SD card not readable"))
 
         # Backup: card pulled while the passphrase is asked for.
-        open_setting(d, ROW_BACKUP)
-        d.screen("text_input", "Backup passphrase", timeout=15)
+        open_backup_prompt(d)
         d.cmd("sdcut on")
         d.type(P3)
         d.key("enter")
@@ -1920,8 +1935,7 @@ def t29_sd_pulled(d):
         # file write or the read-back check, depending on N).
         outcomes = {}
         for ms in (0, 1, 2, 5, 10, 20, 50, 100, 250, 500):
-            open_setting(d, ROW_BACKUP)
-            d.screen("text_input", "Backup passphrase", timeout=15)
+            open_backup_prompt(d)
             d.cmd(f"sdcut {ms}")
             d.type(P3)
             d.key("enter")
@@ -1954,7 +1968,7 @@ def t29_sd_pulled(d):
                 check(st["title"] in SD_FAIL_TITLES, f"{name}: {st}")
                 d.key("enter")
                 continue
-            d.screen("text_input", "Backup passphrase")
+            type_restore_passphrase(d)
             d.type(P3)
             d.key("enter")
             st = d.wait(lambda s: s["screen"] in ("confirm", "message"), f"result for {name}", 30)
@@ -1984,7 +1998,7 @@ def t29_sd_pulled(d):
         names = restore_menu_names(d)
         check(names[0] == good, f"newest backup not first: {names}")
         d.key("enter")
-        d.screen("text_input", "Backup passphrase")
+        type_restore_passphrase(d)
         d.type(P3)
         d.key("enter")
         d.screen("confirm", "Replace vault?", timeout=30)
@@ -1999,6 +2013,185 @@ def t29_sd_pulled(d):
         except Fail:
             pass
 
+
+
+def password_picker_rows(entries):
+    """What "Choose password" should list, the way the firmware decides it:
+    Password entries sorted by title bytes with ASCII-only case folding (C
+    tolower), then id; and why an entry can't protect a backup (length in
+    bytes first, then only ' ', \t, \r, \n), as backup_key_problem does."""
+    def fold(title):
+        return bytes(c + 32 if 65 <= c <= 90 else c for c in title.encode())
+
+    def problem(e):
+        v = e["fields"].get("5", "").encode()
+        if len(v) < 8:
+            return "too short"
+        if len(v) > 128:
+            return "too long"
+        return "only spaces" if not v.strip(b" \t\r\n") else ""
+
+    pw = sorted((e for e in entries if e["type"] == 3), key=lambda e: (fold(e["title"]), e["id"]))
+    return [e["title"] for e in pw], [problem(e) for e in pw]
+
+
+def t31_sd_backup_with_saved_password(d):
+    """#84: a saved Password entry can be the backup passphrase. Only Password
+    entries are offered, unusable ones say why and are refused, Esc goes back
+    to the choice of typing, the file really is encrypted with that password
+    (a locked restore by typing it opens it), and a restore while unlocked can
+    pick the entry too. No step counts an attempt."""
+    need_card()
+    key = "saved backup key 2026"
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    restore_point = backup_now(d)  # P3: put back at the end, so re-runs start alike
+    vault = {"pass": P3}  # the passphrase the device vault has right now
+    try:
+        saved_password_steps(d, key, vault)
+    except BaseException:
+        # Leave the vault later scenarios expect (P3) without hiding the failure.
+        try:
+            back_to_restore_point(d, restore_point, vault)
+        except Exception as e:
+            print(f"  t31 cleanup failed too: {e}", flush=True)
+        raise
+    back_to_restore_point(d, restore_point, vault)
+
+
+def back_to_restore_point(d, restore_point, vault):
+    """Restore the P3 backup taken at the start of t31, from wherever it stopped."""
+    for _ in range(8):  # out of any prompt or dialog, declining every confirm
+        st = d.state()
+        if st["screen"] in ("home", "unlock", "setup"):
+            break
+        d.key("n" if st["screen"] == "confirm" else "esc")
+        time.sleep(0.3)
+    if st["screen"] == "unlock":
+        d.unlock(vault["pass"])
+    if st["screen"] == "setup":  # factory reset and no vault yet
+        d.key("tab")
+        st = d.screen("menu", "Choose backup", timeout=15)
+        names = info(st)["items"].split("|")
+    else:
+        names = restore_menu_names(d)
+    d.key("down", names.index(restore_point))
+    d.key("enter")
+    if d.state()["open"]:
+        type_restore_passphrase(d)
+    else:
+        d.screen("text_input", "Backup passphrase")
+    d.type(P3)
+    d.key("enter")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("y")
+    d.screen("confirm", "Restored", timeout=30)
+    vault["pass"] = P3
+    d.key("n")
+    d.screen("home")
+
+
+def saved_password_steps(d, key, vault):
+    new_entry(d, "Password")
+    d.key("down", 2)
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type(key)
+    d.key("enter")
+    set_title(d, "Backup key")
+    save_entry(d)
+    d.screen("entry_view")
+    new_entry(d, "Password")
+    d.key("down", 2)
+    d.key("enter")
+    d.screen("text_input", "Password")
+    d.type("hunter2")
+    d.key("enter")
+    set_title(d, "Short")
+    save_entry(d)
+    d.screen("entry_view")
+    before = d.dump()
+    titles, details = password_picker_rows(before)
+    check("Backup key" in titles and details[titles.index("Short")] == "too short",
+          f"picker rows: {titles} {details}")
+
+    # Backup > Use saved password: only Password entries, in home order.
+    open_setting(d, ROW_BACKUP)
+    st = d.screen("menu", "Backup passphrase", timeout=15)
+    check(info(st)["details"].split("|")[0] == f"{len(titles)} saved", f"count: {st}")
+    d.menu_pick("Use saved password")
+    st = d.screen("menu", "Choose password")
+    check(info(st)["items"].split("|") == titles, f"picker items: {st} want {titles}")
+    check(info(st)["details"].split("|") == details, f"picker details: {st} want {details}")
+    d.key("esc")  # back to the choice, not out of the backup
+    st = d.screen("menu", "Backup passphrase")
+    check(info(st)["items"] == "Use saved password|Type a passphrase", f"after Esc: {st}")
+    d.menu_pick("Use saved password")
+    d.menu_pick("Short")  # too short: refused, the picker comes back on the same row
+    d.toast("Use 8-128")
+    st = d.screen("menu", "Choose password")
+    check(info(st)["sel"] == str(titles.index("Short")), f"selection kept: {st}")
+    d.key("up", titles.index("Short"))  # menu_pick counts from the first row
+    d.menu_pick("Backup key")
+    st = d.screen("confirm", "Use saved password")
+    check('"Backup key"' in info(st)["msg"] and "off this device" in info(st)["msg"], f"{st}")
+    d.key("y")
+    st = d.screen("message", "Backup saved", timeout=60)
+    check('password of "Backup key"' in info(st)["msg"], f"saved message: {st}")
+    name = backup_name_in(st)
+    d.key("enter")
+    check(d.state()["fails"] == 0, "a backup counted an attempt")
+
+    # Change the vault, then restore while unlocked with the saved password.
+    new_entry(d, "Note")
+    set_title(d, "After saved backup")
+    d.key("down")
+    d.key("enter")
+    d.screen("text_input", "Text")
+    d.type("temp")
+    d.key("tab")
+    d.screen("entry_edit")
+    save_entry(d)
+    d.screen("entry_view")
+    check(len(d.dump()) == len(before) + 1, "note not added")
+    names = restore_menu_names(d)
+    check(names[0] == name, f"newest backup not first: {names}")
+    d.key("enter")
+    st = d.screen("menu", "Backup passphrase", timeout=15)
+    check(info(st)["items"] == "Use saved password|Type the passphrase", f"restore menu: {st}")
+    d.menu_pick("Use saved password")
+    st = d.screen("menu", "Choose password")
+    check(set(info(st)["details"].split("|")) == {""}, f"restore marks no entry: {st}")
+    d.key("esc")  # back to the choice; the backup read into RAM is kept
+    d.screen("menu", "Backup passphrase")
+    d.menu_pick("Use saved password")
+    d.menu_pick("Backup key")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("y")
+    vault["pass"] = key  # committed on Y (checked below)
+    d.screen("confirm", "Restored", timeout=30)
+    d.key("n")
+    st = d.screen("home")
+    check(d.dump() == before and st["fails"] == 0, f"saved-password restore: {st}")
+    d.lock()
+    d.unlock(key)  # a restored vault opens with the backup's passphrase
+
+    # Locked (setup screen): no entries to pick, so the password is typed.
+    d.restart_cmd("factory")
+    d.screen("setup")
+    d.key("tab")
+    st = d.screen("menu", "Choose backup", timeout=15)
+    check(info(st)["items"].split("|")[0] == name, f"newest backup not first: {st}")
+    d.key("enter")
+    d.screen("text_input", "Backup passphrase")
+    d.type(key)
+    d.key("enter")
+    d.screen("confirm", "Replace vault?", timeout=30)
+    d.key("y")
+    d.screen("confirm", "Restored", timeout=30)
+    d.key("n")
+    st = d.screen("home")
+    check(d.dump() == before and st["fails"] == 0, f"typed restore of the saved-key backup: {st}")
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 

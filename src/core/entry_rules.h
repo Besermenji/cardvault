@@ -28,6 +28,10 @@ bool entry_content_equal(const Entry& a, const Entry& b);
 // passphrases are verbatim, so only "" is empty; elsewhere whitespace-only is.
 bool field_value_empty(uint8_t key, const SString& value);
 
+// List order shared by the home screen and pickers: title compared without
+// case, then id (so entries with the same title keep a stable order).
+bool entry_title_less(const Entry& a, const Entry& b);
+
 // TOTP digits (6/8) and period (10-300 s); invalid values fall back to 6 / 30.
 void totp_settings(const Entry& e, int& digits, uint32_t& period);
 

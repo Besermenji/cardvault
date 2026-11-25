@@ -1,4 +1,5 @@
 // Single-line and multi-line text editor, optionally masked.
+#include <algorithm>
 #include <cmath>
 
 #include "core/entry_rules.h"
@@ -212,16 +213,26 @@ public:
             if (i) out += "|";
             out += items_[i].label.c_str();
         }
+        out += " details=";
+        for (size_t i = 0; i < items_.size(); i++) {
+            if (i) out += "|";
+            out += items_[i].detail.c_str();
+        }
     }
 #endif
-    MenuScreen(const char* title, std::vector<MenuItem> items)
-        : title_(title), items_(std::move(items)) {}
+    MenuScreen(const char* title, std::vector<MenuItem> items, int sel,
+               std::function<void()> on_back)
+        : title_(title), items_(std::move(items)), on_back_(std::move(on_back)) {
+        if (sel > 0 && sel < int(items_.size())) sel_ = sel;
+    }
 
     void on_key(const Key& k) override {
         invalidate();
         int n = int(items_.size());
         if (k.back()) {
+            auto back = on_back_;
             app().router.pop();
+            if (back) back();
         } else if (k.up()) {
             sel_ = (sel_ + n - 1) % n;
         } else if (k.down()) {
@@ -256,7 +267,13 @@ public:
             char num[4];
             snprintf(num, sizeof num, "%d", idx + 1);
             text_small(c, 9, y + 5, idx < 9 ? num : " ");
-            text_mono(c, 20, y, fit(items_[idx].label, 22).c_str(), items_[idx].color);
+            // A detail on the right takes columns from the label, so they never overlap.
+            int cols = 22;
+            if (!items_[idx].detail.empty()) {
+                int room = kW - 10 - int(items_[idx].detail.size() + 1) * kSmallW - 20;
+                cols = std::min(cols, room / kMonoW);
+            }
+            text_mono(c, 20, y, fit(items_[idx].label, cols).c_str(), items_[idx].color);
             if (!items_[idx].detail.empty()) {
                 c.setFont(CV_FONT_SMALL);
                 c.setTextColor(color::dim);
@@ -272,6 +289,7 @@ public:
 private:
     const char* title_;
     std::vector<MenuItem> items_;
+    std::function<void()> on_back_;
     int sel_ = 0;
     int first_ = 0;
 };
@@ -324,8 +342,9 @@ ScreenPtr make_text_input(const char* title, const SString& initial, InputOpts o
     return ScreenPtr(new TextInputScreen(title, initial, opts, std::move(done)));
 }
 
-ScreenPtr make_menu(const char* title, std::vector<MenuItem> items) {
-    return ScreenPtr(new MenuScreen(title, std::move(items)));
+ScreenPtr make_menu(const char* title, std::vector<MenuItem> items, int sel,
+                    std::function<void()> on_back) {
+    return ScreenPtr(new MenuScreen(title, std::move(items), sel, std::move(on_back)));
 }
 
 ScreenPtr make_confirm(const char* title, const char* msg, std::function<void()> yes,

@@ -120,6 +120,17 @@ bool entry_content_equal(const Entry& a, const Entry& b) {
     return fields_covered(a, b) && fields_covered(b, a);
 }
 
+bool entry_title_less(const Entry& a, const Entry& b) {
+    size_t n = a.title.size() < b.title.size() ? a.title.size() : b.title.size();
+    for (size_t i = 0; i < n; i++) {
+        int x = tolower(uint8_t(a.title[i]));
+        int y = tolower(uint8_t(b.title[i]));
+        if (x != y) return x < y;
+    }
+    if (a.title.size() != b.title.size()) return a.title.size() < b.title.size();
+    return a.id < b.id;
+}
+
 void totp_settings(const Entry& e, int& digits, uint32_t& period) {
     digits = int_field(e, kFieldTotpDigits, "6") == 8 ? 8 : 6;
     int p = int_field(e, kFieldTotpPeriod, "30");

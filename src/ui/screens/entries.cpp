@@ -143,11 +143,8 @@ private:
         std::vector<const Entry*> list;
         for (auto& e : entries)
             if (icontains(e.title, query_)) list.push_back(&e);
-        std::sort(list.begin(), list.end(), [](const Entry* a, const Entry* b) {
-            return std::lexicographical_compare(
-                a->title.begin(), a->title.end(), b->title.begin(), b->title.end(),
-                [](char x, char y) { return tolower(x) < tolower(y); });
-        });
+        std::sort(list.begin(), list.end(),
+                  [](const Entry* a, const Entry* b) { return entry_title_less(*a, *b); });
         ids_.clear();
         for (auto* e : list) ids_.push_back(e->id);
         if (sel_ >= int(ids_.size())) sel_ = ids_.empty() ? 0 : int(ids_.size()) - 1;
