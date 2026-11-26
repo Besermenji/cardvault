@@ -68,7 +68,8 @@ not CardVault's. CardVault is built for Launcher 2.9.1 (it reads the partition t
 and creates a `vault` storage area), but this has **not yet been verified on hardware**
 ([#28](https://github.com/Besermenji/cardvault/issues/28)). CardVault only ever uses its own `vault`
 partition. Press <kbd>Enter</kbd> or <kbd>G0</kbd> while booting to get back to Launcher and switch
-firmware.
+firmware. Update CardVault from Launcher too: *Update firmware* in CardVault's settings is switched
+off under Launcher, because CardVault's second slot would be Launcher's space.
 
 On the first start after installing through Launcher, CardVault asks to **set up its storage area**.
 Answer **Y**. It only formats CardVault's own `vault` area and **doesn't touch Launcher or any other
@@ -84,6 +85,14 @@ storage area.
 ```sh
 pio run -e cardputer -t upload
 ```
+
+### Updating
+
+Settings > **Update firmware** installs a newer version from the SD card: copy the signed
+`cardvault-vX.Y.Z-cardputer-adv.cvu` from the release page into `/cardvault` on the card. Coming from
+v0.3.0 or older, install the new version once with the web flasher, esptool or M5Burner first (leave
+"Erase device" unticked; your vault is kept). Step by step, and what every message means:
+[docs/UPDATING.md](docs/UPDATING.md).
 
 ## Using it
 

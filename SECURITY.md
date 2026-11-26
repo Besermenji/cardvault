@@ -17,6 +17,12 @@ CardVault protects secrets stored on an M5Stack Cardputer ADV.
 - Casual tampering with the vault file: every byte is authenticated; modified files are rejected.
 - Remote attacks: the firmware never turns on Wi-Fi or Bluetooth. The radio drivers are linked in
   with the Arduino framework but are never started.
+- Installing unofficial firmware through Settings › *Update firmware* (SD card): it installs only
+  `.cvu` files signed with the CardVault release key (Ed25519), only the same or a newer version, and
+  only while the vault is unlocked. The private key exists only as a secret of the GitHub `release`
+  environment, used by one workflow job that needs a maintainer's approval, plus an offline backup.
+  Whoever controls that key (or the maintainer's GitHub account and that approval) can sign firmware
+  every device accepts; USB flashing stays open on devices without secure boot either way.
 
 The Argon2id cost is time-hard and only lightly memory-hard (128 KiB on a Cardputer ADV). One core of
 an Apple M1 running the same code computes about 120 guesses per second (measured 2026-10-27),
@@ -28,7 +34,8 @@ passphrase alone.
   brute-forces the passphrase **offline**. Without ESP32 secure boot + flash encryption
   (irreversible eFuse changes, not enabled by default), the attempt limit can be bypassed
   this way. **A long, random passphrase is your real protection** (e.g. 5+ diceware words).
-- Malicious firmware flashed onto your device before you type your passphrase. This includes other
+- Malicious firmware flashed onto your device (over USB, or a signed update if the release key
+  were stolen) before you type your passphrase. This includes other
   firmware installed next to CardVault with Launcher: it can read the encrypted vault (enabling offline
   guessing) and reset the attempt counter stored in the shared NVS partition.
 - Someone who gets a copy of an SD backup (`/cardvault/*.cvb`). It is encrypted and authenticated, but

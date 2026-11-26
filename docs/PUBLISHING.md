@@ -7,8 +7,33 @@
 3. The **Release** workflow checks that the tag is on `main`, that CI passed for the commit and that the
    version and changelog match. In parallel it builds with read-only access and checks the merged image
    (`tools/check_release_image.sh`) and the flasher (`tools/check_flasher.sh`); a separate job, which needs
-   both, creates the GitHub release (merged image, app-only image, SHA-256 file). Once the repo is public the
-   images also get a build attestation, and a final (non-`-rc`) release deploys the web flasher to Pages.
+   both, creates the GitHub release (merged image, app-only image, SD update file `.cvu`, SHA-256 file). Once
+   the repo is public the images also get a build attestation, and a final (non-`-rc`) release deploys the web
+   flasher to Pages.
+4. The `sign` job waits for approval (the `release` environment's required reviewer) and then signs the
+   `.cvu` with the release key. Approve it in the run's page.
+
+## SD update signing key
+
+SD updates (#85, [UPDATING.md](UPDATING.md)) install only `.cvu` files signed with the release key
+(Ed25519). Its public half is `tools/update_key.pub.pem` and the bytes in `src/platform/update_key.h`
+(CI checks they match and that the key is not the test key or the placeholder).
+
+- The private key is the secret `CV_UPDATE_KEY` of the GitHub environment `release`, which has the
+  maintainer as required reviewer, plus one offline backup (paper or an encrypted USB stick, never the
+  repository or a cloud drive). Only the `sign` job of `release.yml` reads it; that job installs nothing.
+- Created once with OpenSSL 3:
+  `openssl genpkey -algorithm ed25519 -out cardvault-update.pem`, then
+  `gh api -X PUT repos/Besermenji/cardvault/environments/release` (creates the environment; add the
+  reviewer under Settings > Environments), `gh secret set CV_UPDATE_KEY --env release < cardvault-update.pem`
+  and `openssl pkey -in cardvault-update.pem -pubout -out tools/update_key.pub.pem` (commit the public key
+  and copy its 32 bytes into `update_key.h`).
+- **Key lost:** devices can no longer take SD updates from new releases. Make a new key as above; every
+  user then installs one release with the web flasher, esptool or M5Burner, and SD updates work again.
+- **Key leaked:** treat it as a security incident. Delete the secret, make a new key, publish a release
+  with the new key (users install it over USB) and say in the release notes why.
+- The `.cvu` version is the tag's (`v0.4.0-rc1` gives `0.4.0-rc1`). A device refuses older versions and
+  accepts the same version again.
 
 Verify a download with `sha256sum -c <name>.sha256`, and, for a public repo, with
 `gh attestation verify <name>.bin --repo Besermenji/cardvault`.

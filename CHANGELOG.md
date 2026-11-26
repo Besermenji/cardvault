@@ -6,6 +6,24 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Update firmware from the SD card (#85). Settings > *Update firmware* lists the `.cvu` files in
+  `/cardvault`, installs the chosen one into a second firmware slot and restarts. Only files signed with
+  the CardVault release key (Ed25519) and the same or a newer version are accepted, and only while the
+  vault is unlocked. A power cut during the install leaves the old version in place; a new version that
+  doesn't start rolls back to the old one, and the device says so once. Not offered under Launcher.
+  Step by step: [docs/UPDATING.md](docs/UPDATING.md). Releases now include
+  `cardvault-vX.Y.Z-cardputer-adv.cvu`, signed by a separate release job, and the release notes say how
+  to update.
+  e2e t32-t36 cover a same-version install (twice, back and forth), every refusal, a pulled card, a
+  power cut and a rollback.
+
+### Changed
+- The partition table has a second app slot (`app1` at 0x410000). Coming from v0.3.0 or older, install
+  this version once with the web flasher, esptool or M5Burner (in the web flasher leave *Erase device*
+  unticked); the vault stays where it was and is kept. The release check now pins the vault's position.
+- Settings > *About* shows the firmware slot (`app0` or `app1`).
+
 ## [0.3.0] - 2026-11-25
 
 ### Added
