@@ -1,6 +1,6 @@
 # Release table. The vault row must never move: devices keep their vault
 # across a full-image install only because offset, size and label stay the
-# same (CI compares it with v0.3.0). app1 is the second slot for updates
+# same (tools/check_image_partitions.py pins it). app1 is the second slot for updates
 # from the SD card (#85).
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
