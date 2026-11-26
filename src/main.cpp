@@ -129,6 +129,9 @@ void setup() {
             a.router.reset(make_splash(boot_ms, "confirm", [] {
                 return make_confirm(msg::kStorageSetupTitle, msg::kStorageSetup,
                                     [] {
+                                        // Restarts next: an unconfirmed image (a first
+                                        // start under Launcher) would roll back.
+                                        ota::confirm_boot();
                                         app().busy("Setting up...");
                                         app().store.format();
                                         ESP.restart();
@@ -142,6 +145,7 @@ void setup() {
             // did not finish. This runs even when the partition does not mount:
             // it is our own "vault" partition, and an exhausted counter means
             // its contents must go, so no confirmation is asked.
+            ota::confirm_boot();  // the wipe restarts; the image itself is fine
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock:
             ota::confirm_boot();  // storage opened: an update stays installed

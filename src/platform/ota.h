@@ -12,8 +12,9 @@ namespace ota {
 
 // Marks the running image as good. Until this runs, an image installed from
 // the SD card is on probation: if the device resets first, the bootloader
-// starts the previous version again. Call it once the vault storage has
-// opened, so an image that can't read the vault rolls back.
+// starts the previous version again. Called once the vault storage has
+// opened (unlock/setup), and before the restarts of the storage set-up and
+// the boot-time wipe. Under Launcher, Launcher is the "previous version".
 void confirm_boot();
 
 // Label of the running app partition ("app0", "app1", or Launcher's names).
