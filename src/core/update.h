@@ -57,6 +57,7 @@ enum class UpdateError {
 
 // Checks a header in the order that never trusts unsigned fields: layout,
 // signature, then target, size and version. `running` is CV_VERSION parsed.
+// `out` is filled on Ok and on TooOld (the header is genuine, only older).
 UpdateError check_update_header(const uint8_t* buf, size_t len, const uint8_t public_key[32],
                                 const Version& running, uint32_t slot_size, UpdateHeader& out);
 

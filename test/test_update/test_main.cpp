@@ -17,6 +17,7 @@
 #include "platform/update_key.h"
 
 #include "fixture_cvu.h"
+#include "version.h"
 
 using namespace cv;
 
@@ -77,6 +78,12 @@ void test_version_parsing() {
                             "1.2.3-rc01", "1.2.3-rc255", "1.2.3-beta1", "256.0.0", "1.2.3 ",
                             " 1.2.3", "1.2.-3", "1.2.3-RC1", "1..3", "1.2.3x", "1000.0.0"})
         TEST_ASSERT_FALSE_MESSAGE(parse_version(bad, v), bad);
+}
+
+void test_running_version_parses() {
+    // A build whose CV_VERSION doesn't parse could never take an update.
+    Version v;
+    TEST_ASSERT_TRUE_MESSAGE(parse_version(CV_VERSION, v), CV_VERSION);
 }
 
 void test_version_order() {
@@ -161,6 +168,11 @@ void test_header_accepts_same_or_newer_version() {
 
 void test_header_refuses_older_version() {
     TEST_ASSERT_EQUAL(int(UpdateError::TooOld), int(check(make_file("0.2.0", image()))));
+    // The header is genuine, only older: the message can name its version.
+    Signed s = make_file("0.2.0", image());
+    UpdateHeader h;
+    check_update_header(s.file.data(), s.file.size(), s.pub, ver("0.3.0"), 0x300000, h);
+    TEST_ASSERT_EQUAL_STRING("0.2.0", h.version.str().c_str());
     TEST_ASSERT_EQUAL(int(UpdateError::TooOld), int(check(make_file("0.4.0-rc1", image()), "0.4.0")));
     TEST_ASSERT_EQUAL(int(UpdateError::TooOld), int(check(make_file("0.3.9", image()), "0.4.0-rc1")));
 }
@@ -323,6 +335,7 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(test_ed25519_rfc8032_vectors);
     RUN_TEST(test_version_parsing);
+    RUN_TEST(test_running_version_parses);
     RUN_TEST(test_version_order);
     RUN_TEST(test_openssl_signed_fixture_is_accepted);
     RUN_TEST(test_header_accepts_same_or_newer_version);

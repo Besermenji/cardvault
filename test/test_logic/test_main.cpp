@@ -503,6 +503,33 @@ void test_dialog_messages_fit_the_screen() {
     TEST_ASSERT_TRUE(strlen(msg::kCompactAfterPassTitle) <= 20);
 }
 
+// SD firmware update texts (#85), with the longest versions the format allows.
+void test_update_messages_fit_the_screen() {
+    auto fits = [](const char* m) {
+        TEST_ASSERT_TRUE_MESSAGE(int(wrap(m, strlen(m), msg::kDialogCols).size()) <= msg::kDialogMaxLines, m);
+    };
+    for (const char* m : {msg::kUpdateNoCard, msg::kUpdateNoFile, msg::kUpdateLauncher,
+                          msg::kUpdateNoSlot, msg::kUpdateInMemory, msg::kUpdateBadFile,
+                          msg::kUpdateBadSignature, msg::kUpdateWrongDevice, msg::kUpdateTooBig,
+                          msg::kUpdateTruncated, msg::kUpdateDamaged, msg::kUpdateReadFailed,
+                          msg::kUpdateWriteFailed})
+        fits(m);
+    const char* v = "255.255.255-rc254";
+    char buf[240];
+    snprintf(buf, sizeof buf, msg::kUpdateTooOld, v, v);
+    fits(buf);
+    snprintf(buf, sizeof buf, msg::kUpdateConfirm, v, v);
+    fits(buf);
+    snprintf(buf, sizeof buf, msg::kUpdateDone, v);
+    fits(buf);
+    snprintf(buf, sizeof buf, msg::kUpdateRolledBack, v, v);
+    fits(buf);
+    for (const char* t : {msg::kUpdateTitle, msg::kUpdateNoFileTitle, msg::kUpdateLauncherTitle,
+                          msg::kUpdateNoSlotTitle, msg::kUpdateFailedTitle, msg::kUpdateOlderTitle,
+                          msg::kUpdateDoneTitle, msg::kUpdateRolledBackTitle, msg::kUpdateInstalling})
+        TEST_ASSERT_TRUE_MESSAGE(strlen(t) <= 20, t);
+}
+
 // ---- Saved password as backup passphrase (#84) ------------------------------
 
 static uint32_t add_entry(VaultData& d, EntryType t, const char* title, uint8_t key,
@@ -719,6 +746,7 @@ int main() {
     RUN_TEST(test_cursor_on_exactly_full_line);
     RUN_TEST(test_fit);
     RUN_TEST(test_dialog_messages_fit_the_screen);
+    RUN_TEST(test_update_messages_fit_the_screen);
     RUN_TEST(test_finalize_default_titles);
     RUN_TEST(test_finalize_rejects_bad_totp_secret);
     RUN_TEST(test_finalize_rejects_empty_defining_field);

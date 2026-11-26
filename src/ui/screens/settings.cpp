@@ -5,6 +5,7 @@
 #include "core/backup_key.h"
 #include "core/flows.h"
 #include "core/messages.h"
+#include "platform/ota.h"
 #include "platform/sd_backup.h"
 #include "ui/app.h"
 #include "vault/serializer.h"
@@ -154,9 +155,9 @@ void show_about() {
     const KdfParams& k = a.session.header().kdf;
     unsigned used = unsigned(serialized_size(a.session.data()));
     snprintf(msg, sizeof msg,
-             "v%s  |  %u secrets  |  %u.%u of %u KB used  |  Argon2id %u KiB x%u  |  heap %u KB "
+             "v%s (%s)  |  %u secrets  |  %u.%u of %u KB used  |  Argon2id %u KiB x%u  |  heap %u KB "
              "free  |  MIT licensed",
-             CV_VERSION, unsigned(a.session.data().entries.size()), used / 1024,
+             CV_VERSION, ota::running_slot(), unsigned(a.session.data().entries.size()), used / 1024,
              used % 1024 * 10 / 1024, unsigned(kMaxPayload / 1024), unsigned(k.mem_kib),
              unsigned(k.passes), unsigned(heap_caps_get_free_size(MALLOC_CAP_8BIT) / 1024));
     a.router.push(make_message("CardVault", msg, color::accent));
@@ -191,9 +192,10 @@ public:
         int visible = kBodyH / row_h;
         if (sel_ < first_) first_ = sel_;
         if (sel_ >= first_ + visible) first_ = sel_ - visible + 1;
-        static const char* labels[kRows] = {"Auto-lock",       "Brightness",     "Set clock (UTC)",
-                                            "Change passphrase", "Backup to SD", "Restore from SD",
-                                            "About",           "Compact vault",  "Erase vault"};
+        static const char* labels[kRows] = {"Auto-lock",       "Brightness",      "Set clock (UTC)",
+                                            "Change passphrase", "Backup to SD",  "Restore from SD",
+                                            "Update firmware", "About",           "Compact vault",
+                                            "Erase vault"};
         for (int i = 0; i < visible && first_ + i < kRows; i++) {
             int idx = first_ + i;
             int y = kBodyY + i * row_h;
@@ -216,7 +218,7 @@ public:
     }
 
 private:
-    static constexpr int kRows = 9;
+    static constexpr int kRows = 10;
 
     void adjust(int d) {
         App& a = app();
@@ -246,9 +248,10 @@ private:
             case 3: change_passphrase_flow(); break;
             case 4: start_backup_flow(); break;
             case 5: start_restore_flow(); break;
-            case 6: show_about(); break;
-            case 7: compact_flow(); break;
-            case 8: erase_flow(); break;
+            case 6: start_update_flow(); break;
+            case 7: show_about(); break;
+            case 8: compact_flow(); break;
+            case 9: erase_flow(); break;
         }
     }
 

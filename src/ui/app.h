@@ -157,6 +157,10 @@ void ask_set_time(std::function<void()> done = nullptr);
 // Picks a backup on the SD card and restores it (works while locked).
 void start_restore_flow();
 void start_backup_flow();
+// Settings > Update firmware: installs a signed .cvu from the SD card (#85).
+void start_update_flow();
+// The boot after an install says once whether the new version started; then next().
+ScreenPtr with_update_outcome(std::function<ScreenPtr()> next);
 // Menu for choosing a new entry type.
 void open_new_entry_menu();
 // Seed phrase entry: choose word count / generate, then type words.

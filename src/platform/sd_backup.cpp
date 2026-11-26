@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <mutex>
 
 #ifdef CV_TEST_HOOKS
@@ -159,21 +160,71 @@ void unmount() {
     g_mounted = false;
 }
 
-std::vector<std::string> list_backups() {
+namespace {
+// File names in /cardvault ending in `ext` (".cvb", ".cvu").
+std::vector<std::string> list_dir(const char* ext) {
     std::vector<std::string> names;
     if (!mount()) return names;
     File dir = SD.open(kDir);
     if (!dir) return names;
+    size_t el = strlen(ext);
     for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
         std::string n = f.name();
         auto slash = n.rfind('/');
         if (slash != std::string::npos) n = n.substr(slash + 1);
-        if (!f.isDirectory() && n.size() > 4 && n.substr(n.size() - 4) == ".cvb") names.push_back(n);
+        if (!f.isDirectory() && n.size() > el && n.compare(n.size() - el, el, ext) == 0)
+            names.push_back(n);
         f.close();
     }
     dir.close();
+    return names;
+}
+}  // namespace
+
+std::vector<std::string> list_backups() {
+    std::vector<std::string> names = list_dir(".cvb");
     sort_backups(names);
     return names;
+}
+
+std::vector<std::string> list_updates() {
+    std::vector<std::string> names = list_dir(".cvu");
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+bool read_update_head(const std::string& name, uint8_t* buf, size_t n, size_t& got, size_t& size) {
+    got = size = 0;
+    if (!mount()) return false;
+    File f = SD.open((std::string(kDir) + "/" + name).c_str(), FILE_READ);
+    if (!f) return false;
+    size = f.size();
+    got = f.read(buf, n);
+    f.close();
+    return got == std::min(n, size);
+}
+
+bool stream_update(const std::string& name, size_t offset, size_t chunk,
+                   const std::function<bool(const uint8_t*, size_t)>& sink) {
+    arm_cut();
+    if (!mount()) return false;
+    File f = SD.open((std::string(kDir) + "/" + name).c_str(), FILE_READ);
+    if (!f) return false;
+    size_t size = f.size();
+    bool ok = size >= offset && f.seek(offset);
+    std::vector<uint8_t> buf(chunk);
+    for (size_t pos = offset; ok && pos < size;) {
+        size_t want = std::min(chunk, size - pos);
+        size_t n = f.read(buf.data(), want);
+        if (n != want) {
+            ok = false;  // the card failed or was pulled
+            break;
+        }
+        ok = sink(buf.data(), n);
+        pos += n;
+    }
+    f.close();
+    return ok;
 }
 
 bool write_backup(const std::vector<uint8_t>& image, std::string& name) {

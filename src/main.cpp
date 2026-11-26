@@ -145,11 +145,15 @@ void setup() {
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock:
             ota::confirm_boot();  // storage opened: an update stays installed
-            a.router.reset(make_splash(boot_ms, "unlock", [] { return make_unlock(); }));
+            a.router.reset(make_splash(boot_ms, "unlock", [] {
+                return with_update_outcome([] { return make_unlock(); });
+            }));
             break;
         case BootRoute::Setup:
             ota::confirm_boot();
-            a.router.reset(make_splash(boot_ms, "setup", [] { return make_setup(); }));
+            a.router.reset(make_splash(boot_ms, "setup", [] {
+                return with_update_outcome([] { return make_setup(); });
+            }));
             break;
     }
     a.router.apply();

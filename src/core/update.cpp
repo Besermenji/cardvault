@@ -108,10 +108,9 @@ UpdateError check_update_header(const uint8_t* buf, size_t len, const uint8_t pu
     h.image_len = load_le32(buf + 40);
     if (h.image_len == 0) return UpdateError::BadFile;
     if (h.image_len > slot_size) return UpdateError::TooBig;
-    if (compare_versions(h.version, running) < 0) return UpdateError::TooOld;
     memcpy(h.image_hash, buf + 48, 64);
-    out = h;
-    return UpdateError::Ok;
+    out = h;  // also for TooOld, so the message can name the version
+    return compare_versions(h.version, running) < 0 ? UpdateError::TooOld : UpdateError::Ok;
 }
 
 UpdateImageCheck::UpdateImageCheck(const UpdateHeader& h)
