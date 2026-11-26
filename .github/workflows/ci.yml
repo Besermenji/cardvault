@@ -86,6 +86,20 @@ jobs:
       - name: Merge image, checking vault address and test or debug code
         run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
+      # Positive control: a manifest that writes the merged image (which blanks NVS) must fail.
+      - name: Flasher parts check rejects installing the merged image
+        run: |
+          printf '{"builds":[{"parts":[{"path":"cardvault.bin","offset":0}]}]}' > merged-manifest.json
+          if python3 tools/check_flash_parts.py release "cardvault-vci-${GITHUB_SHA::7}-cardputer-adv" \
+               --manifest merged-manifest.json; then
+            echo "check accepted a manifest that installs the merged image"; exit 1
+          fi
+          sed 's/32768/36864/' docs/flasher/manifest.json > nvs-manifest.json
+          if python3 tools/check_flash_parts.py release "cardvault-vci-${GITHUB_SHA::7}-cardputer-adv" \
+               --manifest nvs-manifest.json; then
+            echo "check accepted a part written into NVS"; exit 1
+          fi
+
       # The release job signs with OpenSSL the same way, with the real key.
       - name: SD update file builds and checks (test key), and fails with another key
         run: |

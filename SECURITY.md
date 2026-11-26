@@ -51,6 +51,10 @@ passphrase alone.
 - Losing the device without a backup. Always keep an independent backup of seed phrases.
 - Someone destroying your vault on purpose: anyone holding the device can trigger the 10-failure
   wipe. Keep SD backups.
+- Losing the attempt counter in an upgrade. The merged `.bin` written at `0x0` (M5Burner, esptool)
+  overwrites NVS. CardVault treats a missing counter as nine failures, so that nobody gains guesses by
+  reinstalling: the owner gets one attempt after a 5-minute wait, and a wrong one wipes the vault. The
+  web flasher and the esptool parts command don't touch NVS ([docs/UPDATING.md](docs/UPDATING.md)).
 - Rollback: an older valid vault or backup being put back (by someone writing the flash, or by you
   restoring an old backup) is not detected.
 - A wipe covers the vault partition only. SD backups and the settings (auto-lock, brightness) survive it.

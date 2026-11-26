@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds a single flashable image (bootloader + partitions + app) for
-# esptool / web flasher / M5Burner. Run after `pio run -e <env>`.
+# Builds a single flashable image (bootloader + partitions + app) for M5Burner,
+# Launcher and first installs, plus the same image as four parts for upgrades (web
+# flasher and esptool; see tools/check_flash_parts.py). Run after `pio run -e <env>`.
 #   usage: tools/merge_bin.sh <version> [out_dir] [env]
 # env defaults to "cardputer", the only release environment. Its image is
 # checked with tools/check_release_image.sh and deleted if the check fails.
@@ -42,8 +43,15 @@ if ! "$(dirname "$0")/check_release_image.sh" "$OUT/${NAME}.bin"; then
     exit 1
 fi
 
+# The same image as four parts. Writing these instead of the merged file keeps NVS, and
+# with it the attempt counter, so they are what upgrades use (web flasher and esptool).
+cp "$BUILD/bootloader.bin" "$OUT/${NAME}-bootloader.bin"
+cp "$BUILD/partitions.bin" "$OUT/${NAME}-partitions.bin"
+cp "$BOOT_APP0" "$OUT/${NAME}-otadata.bin"
 cp "$BUILD/firmware.bin" "$OUT/${NAME}-app-only.bin"
+"$(dirname "$0")/check_flash_parts.py" "$OUT" "$NAME"
 if command -v sha256sum >/dev/null; then SHA="sha256sum"; else SHA="shasum -a 256"; fi
-(cd "$OUT" && $SHA "${NAME}.bin" "${NAME}-app-only.bin" > "${NAME}.sha256")
+(cd "$OUT" && $SHA "${NAME}.bin" "${NAME}-app-only.bin" "${NAME}-bootloader.bin" \
+    "${NAME}-partitions.bin" "${NAME}-otadata.bin" > "${NAME}.sha256")
 echo "Wrote $OUT/${NAME}.bin"
 cat "$OUT/${NAME}.sha256"

@@ -7,7 +7,10 @@
 3. The **Release** workflow checks that the tag is on `main`, that CI passed for the commit and that the
    version and changelog match. In parallel it builds with read-only access and checks the merged image
    (`tools/check_release_image.sh`) and the flasher (`tools/check_flasher.sh`); a separate job, which needs
-   both, creates the GitHub release (merged image, app-only image, SD update file `.cvu`, SHA-256 file). Once
+   both, creates the GitHub release (merged image; its four parts: bootloader, partitions, otadata and
+   app-only; SD update file `.cvu`; SHA-256 file). The web flasher installs the four parts, never the
+   merged image: the merged one overwrites NVS and with it the attempt counter
+   (`tools/check_flash_parts.py` enforces this). Once
    the repo is public the images also get a build attestation, and a final (non-`-rc`) release deploys the web
    flasher to Pages.
 4. The `sign` job waits for approval (the `release` environment's required reviewer) and then signs the
@@ -29,7 +32,7 @@ SD updates (#85, [UPDATING.md](UPDATING.md)) install only `.cvu` files signed wi
   and `openssl pkey -in cardvault-update.pem -pubout -out tools/update_key.pub.pem` (commit the public key
   and copy its 32 bytes into `update_key.h`).
 - **Key lost:** devices can no longer take SD updates from new releases. Make a new key as above; every
-  user then installs one release with the web flasher, esptool or M5Burner, and SD updates work again.
+  user then updates once over USB (web flasher, or esptool with the four parts), and SD updates work again.
 - **Key leaked:** treat it as a security incident. Delete the secret, make a new key, publish a release
   with the new key (users install it over USB) and say in the release notes why.
 - The `.cvu` version is the tag's (`v0.4.0-rc1` gives `0.4.0-rc1`). A device refuses older versions and
@@ -51,7 +54,9 @@ Publishing needs the maintainer's M5Stack community account, so it is done by ha
    - Name: `CardVault`
    - Version: `X.Y.Z`
    - Device: **Cardputer**
-   - Description: short feature summary + "Wi-Fi/BT never turned on. Source: GitHub link" + the support
+   - Description: short feature summary + "Wi-Fi/BT never turned on. Source: GitHub link" + the update
+     warning: `Updating? Do not use M5Burner over an existing vault: you would get only ONE passphrase
+     attempt and a typo erases it. See docs/UPDATING.md on GitHub.` + the support
      line (Launcher shows the same text):
      `Support: BTC bc1qwa2d9rg06dz97rdcjg00cy3j9myevawq9075fy / ETH 0xa263474B98a69478aaeb7ac5562f1647D3c24712`
    - GitHub: `https://github.com/Besermenji/cardvault`

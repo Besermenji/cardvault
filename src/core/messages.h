@@ -115,9 +115,10 @@ constexpr const char* kUpdateLauncher =
     "CardVault was installed through Launcher or with another partition table. Update it from "
     "Launcher.";
 constexpr const char* kUpdateNoSlotTitle = "Full install needed";
+// Not M5Burner: it writes one file over the attempt counter, leaving a single try.
 constexpr const char* kUpdateNoSlot =
-    "Install this version once with the web flasher or M5Burner. Your vault is kept. After "
-    "that, SD updates work.";
+    "Back up to SD first. Then install this version once with the web flasher, leaving Erase "
+    "device unticked. After that, SD updates work.";
 constexpr const char* kUpdateInMemory =
     "Your vault is only in memory right now. Fix storage (Compact vault) before updating.";
 constexpr const char* kUpdateFailedTitle = "Update failed";

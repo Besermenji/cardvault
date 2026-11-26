@@ -38,11 +38,22 @@ if [ "$(printf '%s\n%s\n' "$base" "$FIRST_SD_UPDATE" | sort -V | head -n1)" != "
 fi
 guide="https://github.com/Besermenji/cardvault/blob/main/docs/UPDATING.md"
 img="cardvault-${TAG}-cardputer-adv"
+parts="0x0 ${img}-bootloader.bin 0x8000 ${img}-partitions.bin 0xe000 ${img}-otadata.bin 0x10000 ${img}-app-only.bin"
+usb_upgrade() {
+    printf -- '  - web flasher, with *Erase device* unticked, or\n'
+    printf -- '  - `esptool.py --chip esp32s3 write_flash %s`\n' "$parts"
+}
 printf '\n### How to update\n\n'
+printf -- '**Make an SD backup first.**\n\n'
 if [ "$base" = "$FIRST_SD_UPDATE" ]; then
-    printf -- '- **Everyone:** install `%s.bin` once with the web flasher, esptool or M5Burner. Your vault is kept; in the web flasher, leave *Erase device* unticked. From this version on, later versions can be installed from the SD card (`%s.cvu`, Settings > Update firmware).\n' "$img" "$img"
+    printf -- '- **Everyone** (once, over USB; your vault is kept). Use one of:\n'
+    usb_upgrade
+    printf -- '  From this version on, later versions can be installed from the SD card (`%s.cvu`, Settings > Update firmware).\n' "$img"
 else
     printf -- '- **From v%s or newer:** copy `%s.cvu` into `/cardvault` on the SD card, then Settings > Update firmware.\n' "$FIRST_SD_UPDATE" "$img"
-    printf -- '- **From an older version:** install `%s.bin` with the web flasher, esptool or M5Burner. Your vault is kept; in the web flasher, leave *Erase device* unticked.\n' "$img"
+    printf -- '- **From an older version** (once, over USB; your vault is kept). Use one of:\n'
+    usb_upgrade
 fi
-printf -- '- **Installed through Launcher:** update from Launcher.\n\nStep by step: [docs/UPDATING.md](%s).\n' "$guide"
+printf -- '- **Installed through Launcher:** update from Launcher.\n'
+printf -- '\n> **M5Burner, or `%s.bin` written at 0x0:** this erases the wrong-passphrase counter. Over an existing vault you then get **one** passphrase attempt, after a 5-minute wait, and **a typo erases the vault**. Press <kbd>opt</kbd> to show what you type and check it before Enter.\n' "$img"
+printf -- '\nStep by step: [docs/UPDATING.md](%s).\n' "$guide"

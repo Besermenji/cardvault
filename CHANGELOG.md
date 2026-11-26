@@ -19,10 +19,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
   power cut and a rollback.
 
 ### Changed
-- The partition table has a second app slot (`app1` at 0x410000). Coming from v0.3.0 or older, install
-  this version once with the web flasher, esptool or M5Burner (in the web flasher leave *Erase device*
-  unticked); the vault stays where it was and is kept. The release check now pins the vault's position.
+- The partition table has a second app slot (`app1` at 0x410000). Coming from v0.3.0 or older, update
+  once over USB with the web flasher (leave *Erase device* unticked) or esptool and the four part files;
+  the vault stays where it was and is kept. The release check now pins the vault's position.
 - Settings > *About* shows the firmware slot (`app0` or `app1`).
+
+### Fixed
+- Updating over USB no longer costs the attempt counter. The single merged `.bin` overwrites the area
+  that holds it, after which CardVault allows one passphrase attempt (after 5 minutes) and a wrong one
+  erases the vault; this was true of every earlier update with that file. The web flasher now installs
+  the firmware as four parts that skip the area, releases include those parts for esptool, and a build
+  check keeps them that way. **M5Burner and flashing the single file at 0x0 still erase the counter**:
+  use them for first installs only.
 
 ## [0.3.0] - 2026-11-25
 

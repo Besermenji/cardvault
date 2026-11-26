@@ -109,8 +109,13 @@ jobs:
           mkdir -p site
           cp -r docs/flasher/* site/
           img=$(ls release/cardvault-*-cardputer-adv.bin)
-          cp "$img" site/cardvault.bin
-          sha=$(sha256sum "$img" | cut -d' ' -f1)
+          # The parts, not the merged image: they keep the vault's attempt counter.
+          base="${img%.bin}"
+          cp "${base}-bootloader.bin" site/bootloader.bin
+          cp "${base}-partitions.bin" site/partitions.bin
+          cp "${base}-otadata.bin" site/otadata.bin
+          cp "${base}-app-only.bin" site/firmware.bin
+          sha=$(sha256sum site/firmware.bin | cut -d' ' -f1)
           sed -i "s/__VERSION__/${GITHUB_REF_NAME#v}/g" site/manifest.json site/index.html
           sed -i "s/__SHA256__/$sha/; s/__BTC__/$BTC/; s/__ETH__/$ETH/" site/index.html
           grep -qF "$sha" site/index.html || { echo "image hash missing from the flasher"; exit 1; }

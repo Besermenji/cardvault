@@ -56,9 +56,15 @@ Download `cardvault-vX.Y.Z-cardputer-adv.bin` from
 esptool.py --chip esp32s3 write_flash 0x0 cardvault-vX.Y.Z-cardputer-adv.bin
 ```
 
+This single file is for a **first install**. To update a device that already has a vault, don't use it
+(see [Updating](#updating)).
+
 ### M5Burner
 
 Search for *CardVault* in M5Burner's Cardputer section.
+
+M5Burner is fine for a **first install**. Updating a vault with it erases the wrong-passphrase counter
+(see [Updating](#updating)).
 
 ### Next to other firmware (Launcher)
 
@@ -88,11 +94,16 @@ pio run -e cardputer -t upload
 
 ### Updating
 
-Settings > **Update firmware** installs a newer version from the SD card: copy the signed
-`cardvault-vX.Y.Z-cardputer-adv.cvu` from the release page into `/cardvault` on the card. Coming from
-v0.3.0 or older, install the new version once with the web flasher, esptool or M5Burner first (leave
-"Erase device" unticked; your vault is kept). Step by step, and what every message means:
-[docs/UPDATING.md](docs/UPDATING.md).
+Make an SD backup first. Settings > **Update firmware** installs a newer version from the SD card:
+copy the signed `cardvault-vX.Y.Z-cardputer-adv.cvu` from the release page into `/cardvault` on the
+card. Coming from v0.3.0 or older, update once over USB first, with the web flasher ("Erase device"
+unticked) or esptool and the four part files; your vault is kept.
+
+**Warning: writing the single `cardvault-vX.Y.Z-cardputer-adv.bin` over an existing vault (M5Burner,
+or esptool at 0x0) erases the wrong-passphrase counter. You then get one passphrase attempt, after a
+5-minute wait, and a typo erases the vault.**
+
+Step by step, and what every message means: [docs/UPDATING.md](docs/UPDATING.md).
 
 ## Using it
 

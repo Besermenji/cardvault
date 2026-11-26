@@ -50,14 +50,20 @@
     <div class="card warn">
       <b>Before you install:</b> flashing replaces whatever firmware is on the device.
       If you already use CardVault, make an SD backup first, because erasing the flash erases the vault.
-      To keep your vault when updating, leave <b>Erase device</b> unticked. From v0.4.0 on, CardVault
+      To keep your vault when updating, leave <b>Erase device</b> unticked. This page then also keeps
+      the wrong-passphrase counter. (Flashing the single <code>.bin</code> file at address 0 with another
+      tool erases that counter: CardVault then allows <b>one</b> passphrase attempt, after 5 minutes,
+      and a typo erases the vault.) From v0.4.0 on, CardVault
       can also update itself from the SD card (Settings &gt; Update firmware): see the
       <a href="https://github.com/Besermenji/cardvault/blob/main/docs/UPDATING.md">update guide</a>.
       Verify the image checksum against the
       <a href="https://github.com/Besermenji/cardvault/releases">GitHub release</a>.
-      <p class="sub support-sub">SHA-256 of the image this page installs:<br><code class="hash">__SHA256__</code></p>
-      <p class="sub support-sub">The image is built by the release workflow from the tagged source. Check it with
-        <code>gh attestation verify cardvault-v__VERSION__-cardputer-adv.bin --repo Besermenji/cardvault</code>.
+      <p class="sub support-sub">SHA-256 of the firmware this page installs
+        (<code>cardvault-v__VERSION__-cardputer-adv-app-only.bin</code>):<br><code class="hash">__SHA256__</code><br>
+        The bootloader, partition table and OTA data it installs with it are listed in the release's
+        <code>.sha256</code> file.</p>
+      <p class="sub support-sub">It is built by the release workflow from the tagged source. Check it with
+        <code>gh attestation verify cardvault-v__VERSION__-cardputer-adv-app-only.bin --repo Besermenji/cardvault</code>.
         This page serves its own copy of esp-web-tools, with no code from other hosts.</p>
     </div>
 
