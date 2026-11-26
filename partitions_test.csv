@@ -1,8 +1,11 @@
 # Test builds only. The vault partition has its own label, so a test build
 # can never open the production "vault" partition (partitions.csv). Its
-# address differs too; NVS uses separate namespaces.
+# address differs too, and 0x310000-0x410000 (the release vault) is left
+# unallocated, so flashing a test build never overwrites a real vault. NVS
+# uses separate namespaces. app0/app1 match the release table.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  ota_0,   0x10000,  0x300000,
-cvtvault, data, spiffs,  0x410000, 0x100000,
+app1,     app,  ota_1,   0x410000, 0x300000,
+cvtvault, data, spiffs,  0x710000, 0xF0000,

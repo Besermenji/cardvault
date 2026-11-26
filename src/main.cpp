@@ -6,6 +6,7 @@
 #include "crypto/rng.h"
 #include "platform/device.h"
 #include "platform/nvs_kv.h"
+#include "platform/ota.h"
 #include "test_hooks.h"
 #include "ui/app.h"
 #include "ui/gfx.h"
@@ -143,9 +144,11 @@ void setup() {
             // its contents must go, so no confirmation is asked.
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock:
+            ota::confirm_boot();  // storage opened: an update stays installed
             a.router.reset(make_splash(boot_ms, "unlock", [] { return make_unlock(); }));
             break;
         case BootRoute::Setup:
+            ota::confirm_boot();
             a.router.reset(make_splash(boot_ms, "setup", [] { return make_setup(); }));
             break;
     }
