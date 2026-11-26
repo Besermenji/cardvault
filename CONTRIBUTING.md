@@ -39,7 +39,8 @@ pio test -e native              # run host unit tests
 ## Screenshots
 
 `docs/screenshots/` is generated, not drawn: when a screen's look changes, flash `cardputer-e2e` and run
-`python3 tools/screenshots.py <port> --yes` (see the README), then commit the changed PNGs. The `shot` command
+`python3 tools/screenshots.py <port> --yes` (add `--sd` with a card in to retake the SD update screens)
+(see the README), then commit the changed PNGs. The `shot` command
 it uses lives in `src/test_hooks.cpp`, so it only exists in the e2e build.
 
 ## UI changes

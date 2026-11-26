@@ -36,10 +36,18 @@ You need a microSD card formatted as FAT32 (the one you use for backups works).
 5. Pick the version. The list shows every `.cvu` on the card. *installed* marks the version you run
    now, *older* marks an older one, and *not valid* marks a file that can't be installed (pick it to
    see why).
+
+   ![The update list showing v0.4.0](screenshots/update-list.png)
 6. Read the question and press <kbd>Y</kbd>. A progress bar shows the install. It takes a few seconds.
    Keep the power on.
+
+   ![The question asked before installing](screenshots/update-confirm.png)
 7. CardVault restarts and says *Updated: CardVault vX.Y.Z is installed*. Press <kbd>Enter</kbd> and
    unlock as usual.
+
+   ![The message after the restart](screenshots/update-done.png)
+
+   The version numbers in these pictures are examples.
 
 Settings > *About* shows the version and the slot it runs from (`app0` or `app1`). The slot changes
 with each SD update; that is normal.
