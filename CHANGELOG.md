@@ -6,13 +6,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
 ### Added
 - Backups with a saved password (#84). Settings > *Backup to SD* now asks how to protect the backup:
   *Use saved password* picks a Password entry from the vault (entries that break the 8-128 character
   rule are listed with the reason and can't be used; Esc goes back to the choice), *Type a passphrase*
-  works as before. A confirmation says that the
-  password also sits inside the backup, so keep a copy off the device. *Restore from SD* offers the
-  same choice while the vault is unlocked; on the lock and setup screens the passphrase is still typed.
+  works as before. A confirmation says that the password also sits inside the backup, so keep a copy
+  off the device. *Restore from SD* offers the same choice while the vault is unlocked; on the lock and
+  setup screens the passphrase is still typed.
   e2e t31 covers it; existing SD scenarios go through the new menu.
 
 ### Changed
@@ -174,6 +176,7 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - Encrypted SD backup and restore with read-back verification.
 - Host unit tests, CI, release pipeline with merged image and web flasher.
 
-[Unreleased]: https://github.com/Besermenji/cardvault/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Besermenji/cardvault/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Besermenji/cardvault/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Besermenji/cardvault/compare/v0.1.0-rc1...v0.2.0
 [0.1.0-rc1]: https://github.com/Besermenji/cardvault/releases/tag/v0.1.0-rc1
