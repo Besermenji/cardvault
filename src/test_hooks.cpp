@@ -22,6 +22,9 @@ namespace {
 
 std::string g_line;
 bool g_g0 = false;
+// New on every boot (`ota` reports it). A software restart keeps the USB link
+// up, so this is how the host sees that one happened.
+uint32_t g_boot_id = 0;
 // Id of the request being answered ("-" when the line had none). Every reply
 // carries it, so the host can tell a late reply from the one it waits for.
 std::string g_id = "-";
@@ -219,7 +222,7 @@ void ota_state() {
     auto label = [](const esp_partition_t* p) { return std::string(p ? p->label : ""); };
     reply("{\"running\":\"" + label(running) + "\",\"state\":\"" + state + "\",\"boot\":\"" +
           label(boot) + "\",\"next\":\"" + label(next) + "\",\"layout\":" +
-          std::to_string(int(ota::layout())) + "}");
+          std::to_string(int(ota::layout())) + ",\"boot_id\":" + std::to_string(g_boot_id) + "}");
 }
 
 bool hex_bytes(const std::string& h, std::vector<uint8_t>& out) {
@@ -443,7 +446,11 @@ void handle(ui::App& a, const std::string& request) {
 }  // namespace
 
 void begin() {
+    // The USB serial driver drops bytes beyond its receive queue (256 by
+    // default), and an `sdstage` line is about 400.
+    Serial.setRxBufferSize(1024);
     Serial.begin(115200);
+    g_boot_id = esp_random();
     Serial.println("CVTEST READY");
 }
 

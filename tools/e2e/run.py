@@ -2250,26 +2250,23 @@ def open_update_menu(d):
     return st, info(st)["items"].split("|"), info(st)["details"].split("|")
 
 
-def wait_install(d, timeout=120):
-    """Y was pressed on the install question. Waits until the device answers
-    again (the install stopped with a message: False) or the link drops with
-    the restart (reconnects: True). The port is never reopened while the
-    install runs: reopening can reset the chip."""
+def wait_install(d, boot_id, timeout=120):
+    """Y was pressed on the install question; `boot_id` is ota()'s from before it.
+    Waits until the device answers again and says whether it restarted (True) or
+    the install ended with a message (False). A software restart keeps the USB
+    link up, so only the boot id tells them apart. The port is not reopened
+    while the install may be running: reopening can reset the chip."""
     end = time.time() + timeout
     while time.time() < end:
         try:
-            d.cmd("ping", timeout=2)
-            return False
+            return json.loads(d.cmd("ota", timeout=2))["boot_id"] != boot_id
         except Fail:
-            continue  # the main loop is busy installing
+            continue  # busy installing, or restarting
         except (serial.SerialException, OSError):
-            break
-    else:
-        raise Fail("the install neither ended nor restarted the device")
-    time.sleep(1.5)
-    d.close(drain=0.5)
-    d.connect(timeout=60)
-    return True
+            time.sleep(1.5)  # the link did drop: the device restarted
+            d.close(drain=0.5)
+            d.connect(timeout=60)
+    raise Fail("the install neither ended nor restarted the device")
 
 
 def until(d, pred, what, timeout=90):
@@ -2303,7 +2300,7 @@ def install_from_menu(d, label):
           f"install question must name both versions: {st}")
     before = ota(d)
     d.cmd("key y")
-    return before, wait_install(d)
+    return before, wait_install(d, before["boot_id"])
 
 
 def update_failed(d, text, before):
@@ -2332,25 +2329,27 @@ def t32_sd_update_same_version(d):
     header, length = update_header()
     v = source_version()
     start = o["running"]
-    for round_ in (1, 2):
-        stage(d, UPDATE_FILE, header, length)
-        _, items, details = open_update_menu(d)
-        check(items == [f"v{v}"] and details == ["installed"], f"menu: {items} {details}")
-        d.key("esc")
-        before, restarted = install_from_menu(d, f"v{v}")
-        check(restarted, "a good update must restart the device"
-              " (a 'damaged' message means the device does not run the cardputer-e2e build in .pio)")
-        st = until(d, lambda s: s["screen"] == "message", "the after-update message")
-        check(st["title"] == "Updated" and f"v{v} is installed" in info(st)["msg"], f"{st}")
-        o = ota(d)
-        check(o["running"] == before["next"] and o["state"] == "valid",
-              f"round {round_}: new slot must run and be confirmed: {before} -> {o}")
-        d.key("enter")
-        d.unlock(P3)
-        check(d.dump() == entries, "the vault must be unchanged by an update")
-        check(d.state()["fails"] == 0, "an update must not count attempts")
-    check(ota(d)["running"] == start, "two updates must come back to the first slot")
-    d.cmd(f"sdrm {UPDATE_FILE}")
+    try:
+        for round_ in (1, 2):
+            stage(d, UPDATE_FILE, header, length)
+            _, items, details = open_update_menu(d)
+            check(items == [f"v{v}"] and details == ["installed"], f"menu: {items} {details}")
+            d.key("esc")
+            before, restarted = install_from_menu(d, f"v{v}")
+            check(restarted, "a good update must restart the device"
+                  " (a 'damaged' message means the device does not run the cardputer-e2e build in .pio)")
+            st = until(d, lambda s: s["screen"] == "message", "the after-update message")
+            check(st["title"] == "Updated" and f"v{v} is installed" in info(st)["msg"], f"{st}")
+            o = ota(d)
+            check(o["running"] == before["next"] and o["state"] == "valid",
+                  f"round {round_}: new slot must run and be confirmed: {before} -> {o}")
+            d.key("enter")
+            d.unlock(P3)
+            check(d.dump() == entries, "the vault must be unchanged by an update")
+            check(d.state()["fails"] == 0, "an update must not count attempts")
+        check(ota(d)["running"] == start, "two updates must come back to the first slot")
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
 
 
 def t33_sd_update_refusals(d):
@@ -2387,16 +2386,14 @@ def t33_sd_update_refusals(d):
             ("c-device.cvu", "for another device"),
             ("d-junk.cvu", "not a CardVault update file"),
         ]
-        for label, text in expect:
-            d.screen("menu", "Update firmware")
+        # A short file is not valid in the list either; picking it says why.
+        expect.append(("e-short.cvu", "incomplete"))
+        for i, (label, text) in enumerate(expect):
+            if i:  # picking a file closed the list
+                open_update_menu(d)
             d.menu_pick(label)
             update_failed(d, text, before)
-        # A short file is not valid in the list; picking it says why.
-        d.screen("menu", "Update firmware")
-        d.menu_pick("e-short.cvu")
-        update_failed(d, "incomplete", before)
         # A damaged image passes the header and is caught after the whole write.
-        d.key("esc")
         _, restarted = install_from_menu(d, f"v{v}")
         check(not restarted, "a damaged image must not restart the device")
         update_failed(d, "The file is damaged", before)
@@ -2422,8 +2419,12 @@ def t34_sd_update_card_pulled(d):
         d.screen("confirm", "Update firmware", timeout=30)
         d.cmd("sdcut 1500")  # taken by the install's read, 1.5 s in
         d.cmd("key y")
-        check(not wait_install(d), "a pulled card must not restart the device")
+        check(not wait_install(d, before["boot_id"]), "a pulled card must not restart the device")
         d.cmd("sdcut off")
+        st = d.state()
+        # It must be the card that is blamed, not the file or the flash.
+        check(st["title"] == "SD card not readable" or "The card could not be read" in info(st)["msg"],
+              f"expected the card-read error: {st}")
         update_failed(d, "", before)
         d.cmd("g0")
         d.unlock(P3)
