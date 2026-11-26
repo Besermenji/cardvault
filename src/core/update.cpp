@@ -177,9 +177,11 @@ std::vector<PartitionInfo> test_layout() {
 }
 #endif
 
-UpdateOutcome update_outcome(bool pending, uint32_t pending_slot, uint32_t running_slot) {
+UpdateOutcome update_outcome(bool pending, uint32_t pending_slot, uint32_t running_slot,
+                             bool pending_slot_invalid) {
     if (!pending) return UpdateOutcome::None;
-    return pending_slot == running_slot ? UpdateOutcome::Installed : UpdateOutcome::RolledBack;
+    if (pending_slot == running_slot) return UpdateOutcome::Installed;
+    return pending_slot_invalid ? UpdateOutcome::RolledBack : UpdateOutcome::None;
 }
 
 }  // namespace cv

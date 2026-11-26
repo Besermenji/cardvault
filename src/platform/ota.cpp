@@ -125,7 +125,10 @@ UpdateOutcome take_outcome(Version& installed) {
     NvsKv rw(CV_NVS_CFG);
     if (rw.begin()) rw.set_u32(kKeySlot, 0);
     installed = Version::unpack(version);
-    return update_outcome(true, slot - 1, slot_index(esp_ota_get_running_partition()));
+    // The bootloader marks an image that never confirmed itself as aborted.
+    const esp_partition_t* invalid = esp_ota_get_last_invalid_partition();
+    return update_outcome(true, slot - 1, slot_index(esp_ota_get_running_partition()),
+                          invalid && slot_index(invalid) == slot - 1);
 }
 
 #ifdef CV_TEST_HOOKS

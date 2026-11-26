@@ -6,6 +6,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Breaking: coming from v0.3.0 or older, update once over USB with the web flasher ("Erase device"
+unticked) or esptool and the four part files.** Make an SD backup first. Don't use M5Burner or the
+single `.bin` over an existing vault: you would get one passphrase attempt, after 5 minutes, and a typo
+erases the vault. Installed through Launcher: update from Launcher, and never pick a "Remove ..."
+option there. See [docs/UPDATING.md](https://github.com/Besermenji/cardvault/blob/main/docs/UPDATING.md).
+
 ### Added
 - Update firmware from the SD card (#85). Settings > *Update firmware* lists the `.cvu` files in
   `/cardvault`, installs the chosen one into a second firmware slot and restarts. Only files signed with

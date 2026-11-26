@@ -117,8 +117,8 @@ constexpr const char* kUpdateLauncher =
 constexpr const char* kUpdateNoSlotTitle = "Full install needed";
 // Not M5Burner: it writes one file over the attempt counter, leaving a single try.
 constexpr const char* kUpdateNoSlot =
-    "Back up to SD first. Then install this version once with the web flasher, leaving Erase "
-    "device unticked. After that, SD updates work.";
+    "Back up to SD first. Then update once with the web flasher, leaving Erase device "
+    "unticked. After that, SD updates work.";
 constexpr const char* kUpdateInMemory =
     "Your vault is only in memory right now. Fix storage (Compact vault) before updating.";
 constexpr const char* kUpdateFailedTitle = "Update failed";

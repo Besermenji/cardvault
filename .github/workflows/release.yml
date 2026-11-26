@@ -166,7 +166,9 @@ jobs:
           v="${GITHUB_REF_NAME#v}"
           name="cardvault-v${v}-cardputer-adv"
           app="release/${name}-app-only.bin"
-          python3 -I tools/make_update.py header --image "$app" --version "$v" --out signed.bin
+          # The version inside is src/version.h's (what the firmware reports), not the tag's: a
+          # v0.4.0-rc1 build calls itself 0.4.0 and must accept its own update file.
+          python3 -I tools/make_update.py header --image "$app" --out signed.bin
           key=$(mktemp)
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$CV_UPDATE_KEY" > "$key"

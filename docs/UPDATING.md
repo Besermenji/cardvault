@@ -26,9 +26,21 @@ This applies to **M5Burner**, which can only write the single file, and to espto
 writing that file at `0x0`. If you have already done it: take your time on the unlock screen, type the
 passphrase, press <kbd>opt</kbd> to show it, and check it before you press <kbd>Enter</kbd>. The
 screen says *1 attempt left before wipe*. If you aren't sure of your passphrase, don't press
-<kbd>Enter</kbd> yet. Powering off doesn't use up the attempt.
+<kbd>Enter</kbd> yet: powering off before <kbd>Enter</kbd> doesn't use up the attempt. Once you press
+<kbd>Enter</kbd>, it counts, even if the power goes off.
 
 The web flasher (with **Erase device unticked**) and the esptool command below leave the counter alone.
+
+## Installed through Launcher
+
+Update CardVault from Launcher, the way you installed it. CardVault's own *Update firmware* is switched
+off there. Make an SD backup first.
+
+If Launcher says it needs space and offers choices, pick **"Use" with CardVault's partition** (this
+replaces the old CardVault and keeps the vault) or **Cancel**. **Never pick an option starting with
+"Remove"**: Launcher can then delete CardVault's storage area, including the vault, whatever the
+option's name says about the data it removes. (Read from Launcher's source, 2.9.1 to 3.0.0; not yet
+tried on a device, see [#28](https://github.com/Besermenji/cardvault/issues/28).)
 
 ## Over USB
 

@@ -111,8 +111,10 @@ std::vector<PartitionInfo> test_layout();  // test builds and host tests only
 #endif
 
 // What the boot after an install found: the slot the update was written to
-// is running (and confirmed) or the bootloader went back to the old one.
+// is running (and confirmed), or the bootloader marked it invalid and went
+// back. Anything else (e.g. a USB install since) says nothing.
 enum class UpdateOutcome { None, Installed, RolledBack };
-UpdateOutcome update_outcome(bool pending, uint32_t pending_slot, uint32_t running_slot);
+UpdateOutcome update_outcome(bool pending, uint32_t pending_slot, uint32_t running_slot,
+                             bool pending_slot_invalid);
 
 }  // namespace cv

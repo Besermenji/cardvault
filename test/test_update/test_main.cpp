@@ -327,9 +327,11 @@ void test_layout_classification() {
 }
 
 void test_update_outcome_after_restart() {
-    TEST_ASSERT_EQUAL(int(UpdateOutcome::None), int(update_outcome(false, 1, 1)));
-    TEST_ASSERT_EQUAL(int(UpdateOutcome::Installed), int(update_outcome(true, 1, 1)));
-    TEST_ASSERT_EQUAL(int(UpdateOutcome::RolledBack), int(update_outcome(true, 1, 0)));
+    TEST_ASSERT_EQUAL(int(UpdateOutcome::None), int(update_outcome(false, 1, 1, false)));
+    TEST_ASSERT_EQUAL(int(UpdateOutcome::Installed), int(update_outcome(true, 1, 1, false)));
+    TEST_ASSERT_EQUAL(int(UpdateOutcome::RolledBack), int(update_outcome(true, 1, 0, true)));
+    // A USB install before the message was shown resets the boot slot: not a rollback.
+    TEST_ASSERT_EQUAL(int(UpdateOutcome::None), int(update_outcome(true, 1, 0, false)));
 }
 
 int main() {

@@ -35,8 +35,9 @@ SD updates (#85, [UPDATING.md](UPDATING.md)) install only `.cvu` files signed wi
   user then updates once over USB (web flasher, or esptool with the four parts), and SD updates work again.
 - **Key leaked:** treat it as a security incident. Delete the secret, make a new key, publish a release
   with the new key (users install it over USB) and say in the release notes why.
-- The `.cvu` version is the tag's (`v0.4.0-rc1` gives `0.4.0-rc1`). A device refuses older versions and
-  accepts the same version again.
+- The `.cvu` version is `src/version.h`'s, the version the firmware reports (for `v0.4.0-rc1` that is
+  `0.4.0`). A device refuses older versions and accepts the same version again, so release candidates
+  and the final release of one version can replace each other.
 
 Verify a download with `sha256sum -c <name>.sha256`, and, for a public repo, with
 `gh attestation verify <name>.bin --repo Besermenji/cardvault`.

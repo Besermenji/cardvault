@@ -2487,6 +2487,57 @@ def t36_sd_update_rolls_back(d):
         d.cmd(f"sdrm {UPDATE_FILE}")
 
 
+def t37_sd_update_then_usb_install(d):
+    """#85: an update is installed, then the boot slot is reset over USB (as a web
+    flasher or esptool update does) before the "Updated" message was shown. The
+    next boot must not claim the update "did not start": it says nothing."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    esptool = find_esptool()
+    core = os.environ.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio"))
+    boot_app0 = os.path.join(core, "packages", "framework-arduinoespressif32", "tools", "partitions",
+                             "boot_app0.bin")
+    if not os.path.exists(boot_app0):
+        raise Skip(f"no {boot_app0}")
+
+    def reset_ota_data():
+        d.close(drain=0)
+        r = subprocess.run(esptool + ["--chip", "esp32s3", "--port", d.port, "write_flash",
+                                      "0xe000", boot_app0], capture_output=True, text=True, timeout=120)
+        check(r.returncode == 0, f"esptool write_flash failed: {r.stdout[-300:]}")
+        time.sleep(3)
+        d.connect()
+
+    # Start on app0, so the update goes to app1 and the reset really goes back.
+    if ota(d)["running"] != "app0":
+        reset_ota_data()
+        d.unlock(P3)
+    header, length = update_header()
+    stage(d, UPDATE_FILE, header, length)
+    try:
+        _, items, _ = open_update_menu(d)
+        d.menu_pick(items[0])
+        d.screen("confirm", "Update firmware", timeout=30)
+        before = ota(d)
+        d.skip_splash = False  # the message must not be consumed before the USB reset
+        try:
+            d.cmd("key y")
+            check(wait_install(d, before["boot_id"]), "the install must restart the device")
+            st = json.loads(d.cmd("state"))
+            check(st["screen"] == "splash" and ota(d)["running"] == "app1",
+                  f"expected the new slot, still on the splash: {st}")
+            reset_ota_data()
+        finally:
+            d.skip_splash = True
+        st = d.screen("unlock", timeout=30)
+        o = ota(d)
+        check(o["running"] == "app0", f"blank OTA data must boot app0: {o}")
+        d.unlock(P3)
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
+
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 
 

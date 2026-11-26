@@ -75,7 +75,9 @@ and creates a `vault` storage area), but this has **not yet been verified on har
 ([#28](https://github.com/Besermenji/cardvault/issues/28)). CardVault only ever uses its own `vault`
 partition. Press <kbd>Enter</kbd> or <kbd>G0</kbd> while booting to get back to Launcher and switch
 firmware. Update CardVault from Launcher too: *Update firmware* in CardVault's settings is switched
-off under Launcher, because CardVault's second slot would be Launcher's space.
+off under Launcher, because CardVault's second slot would be Launcher's space. **When updating, never
+pick a "Remove ..." option in Launcher:** it can delete CardVault's vault (see
+[docs/UPDATING.md](docs/UPDATING.md#installed-through-launcher)).
 
 On the first start after installing through Launcher, CardVault asks to **set up its storage area**.
 Answer **Y**. It only formats CardVault's own `vault` area and **doesn't touch Launcher or any other
