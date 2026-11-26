@@ -2,6 +2,7 @@
 // the streamed image check and the partition-layout check.
 #include <unity.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
