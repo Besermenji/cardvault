@@ -3,7 +3,8 @@
 #   - the partition table in the image has the "vault", "app0" and "app1"
 #     partitions exactly as partitions.csv (the release table) defines them,
 #     no test partition, and the image ends before the vault
-#   - the app contains no test or debug code
+#   - the app contains no test or debug code, and the release (not the test)
+#     key for SD updates
 # Used by CI, the release workflow and merge_bin.sh. Every problem is printed
 # on stderr as "FAIL: <reason>"; exit status 1 if there was any.
 #   usage: tools/check_release_image.sh <merged.bin>
@@ -29,6 +30,11 @@ for marker in CVSHOT CVTEST cvt_guard cvt_cfg cvtvault "unknown command"; do
         problem "image contains test/debug marker: $marker"
     fi
 done
+
+# SD update key (#85): the release key, never the test key anyone can sign with.
+if ! keyout=$(python3 -I "$ROOT/tools/check_update_key.py" --image "$app" 2>&1 >/dev/null); then
+    while IFS= read -r line; do problem "${line#FAIL: }"; done <<< "$keyout"
+fi
 
 if [ "$fail" -ne 0 ]; then
     echo "$IMG is NOT a release image" >&2

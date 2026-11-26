@@ -4,11 +4,9 @@
 #include <esp_partition.h>
 #include <esp_system.h>
 
-#include <cstring>
 #include <vector>
 
 #include "platform/device.h"       // CV_NVS_CFG
-#include "platform/flash_store.h"  // CV_VAULT_LABEL
 #include "platform/nvs_kv.h"
 
 // The Arduino core marks a freshly installed image valid before setup() runs
@@ -68,9 +66,11 @@ LayoutCheck layout() {
         }
         esp_partition_iterator_release(it);
     }
-    // Test builds use partitions_test.csv, recognised by their vault label.
-    bool test_table = strcmp(CV_VAULT_LABEL, "vault") != 0;
-    return classify_layout(actual, test_table ? test_layout() : release_layout());
+#ifdef CV_UPDATE_TEST_KEY
+    return classify_layout(actual, test_layout());  // test builds: partitions_test.csv
+#else
+    return classify_layout(actual, release_layout());
+#endif
 }
 
 uint32_t free_slot_size() {

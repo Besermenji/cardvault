@@ -167,11 +167,15 @@ std::vector<PartitionInfo> release_layout() {
             {"app1", 0, 0x11, 0x410000, 0x300000}};
 }
 
+// Not in release builds: "cvtvault" in a release image fails the release check.
+// Test builds (partitions_test.csv) all set CV_UPDATE_TEST_KEY; the host tests use both.
+#if !defined(ARDUINO) || defined(CV_UPDATE_TEST_KEY)
 std::vector<PartitionInfo> test_layout() {
     return {{"nvs", 1, 0x02, 0x9000, 0x5000},       {"otadata", 1, 0x00, 0xe000, 0x2000},
             {"app0", 0, 0x10, 0x10000, 0x300000},   {"app1", 0, 0x11, 0x410000, 0x300000},
             {"cvtvault", 1, 0x82, 0x710000, 0xF0000}};
 }
+#endif
 
 UpdateOutcome update_outcome(bool pending, uint32_t pending_slot, uint32_t running_slot) {
     if (!pending) return UpdateOutcome::None;

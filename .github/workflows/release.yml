@@ -5,7 +5,9 @@ on:
     tags: ["v*"]
 
 # Nothing is writable unless a job asks for it. Only `publish` and `pages` hold
-# write tokens, and neither checks out or runs repository code.
+# write tokens, and neither checks out or runs repository code. Only `sign` sees
+# the SD update signing key; it installs nothing and runs only the standard-library
+# tools/make_update.py and the runner's OpenSSL.
 permissions: {}
 
 jobs:
@@ -132,9 +134,53 @@ jobs:
         with:
           path: site
 
+  sign:
+    name: Sign the SD update file
+    needs: build
+    runs-on: ubuntu-latest
+    # CV_UPDATE_KEY lives in this environment only; give it required reviewers so
+    # nothing is signed without an approval (docs/PUBLISHING.md).
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Sign the update file with the release key
+        env:
+          CV_UPDATE_KEY: ${{ secrets.CV_UPDATE_KEY }}
+        run: |
+          [ -n "$CV_UPDATE_KEY" ] || { echo "CV_UPDATE_KEY is not set in the release environment"; exit 1; }
+          python3 -I tools/check_update_key.py
+          v="${GITHUB_REF_NAME#v}"
+          name="cardvault-v${v}-cardputer-adv"
+          app="release/${name}-app-only.bin"
+          python3 -I tools/make_update.py header --image "$app" --version "$v" --out signed.bin
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$CV_UPDATE_KEY" > "$key"
+          openssl pkeyutl -sign -inkey "$key" -rawin -in signed.bin -out sig.bin
+          rm -f "$key"
+          mkdir -p update
+          python3 -I tools/make_update.py assemble --header signed.bin --sig sig.bin --image "$app" \
+            --pubkey tools/update_key.pub.pem --out "update/${name}.cvu"
+          python3 -I tools/make_update.py check --pubkey tools/update_key.pub.pem "update/${name}.cvu"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: update
+          path: update/
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub release
-    needs: [verify, build]
+    needs: [verify, build, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -145,11 +191,23 @@ jobs:
         with:
           name: release
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: update
+          path: release
+
+      - name: Checksum for the SD update file
+        run: |
+          name="cardvault-${GITHUB_REF_NAME}-cardputer-adv"
+          (cd release && sha256sum "${name}.cvu" >> "${name}.sha256" && cat "${name}.sha256")
+
       # Attestations are not available for private repositories on this plan.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: ${{ !github.event.repository.private }}
         with:
-          subject-path: release/*.bin
+          subject-path: |
+            release/*.bin
+            release/*.cvu
 
       - name: Publish GitHub release
         env:

@@ -29,6 +29,15 @@ jobs:
           done
           exit $missing
 
+  # Its own job: until the release key is set, this fails without hiding the build's results.
+  update-keys:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: SD update keys match their .pub.pem files and the release key is real
+        run: python3 tools/check_update_key.py
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -74,6 +83,18 @@ jobs:
       - name: Merge image, checking vault address and test or debug code
         run: tools/merge_bin.sh "ci-${GITHUB_SHA::7}" release
 
+      # The release job signs with OpenSSL the same way, with the real key.
+      - name: SD update file builds and checks (test key), and fails with another key
+        run: |
+          python3 tools/make_update.py build --image .pio/build/cardputer/firmware.bin \
+            --key tools/e2e/update_test_key.pem --out ci.cvu
+          python3 tools/make_update.py check --pubkey tools/e2e/update_test_key.pub.pem ci.cvu
+          openssl genpkey -algorithm ed25519 -out other.pem
+          openssl pkey -in other.pem -pubout -out other.pub.pem
+          if python3 tools/make_update.py check --pubkey other.pub.pem ci.cvu; then
+            echo "check accepted a file signed with another key"; exit 1
+          fi
+
       - name: Debug, e2e and on-device test builds compile
         run: |
           pio run -e cardputer-debug
@@ -96,8 +117,8 @@ jobs:
                 echo "check did not report '$reason' for $env_name:"; cat control.err; exit 1; }
             done
           }
-          expect_fail cardputer-debug "no 'vault' partition" "test partition 'cvtvault'" "marker: CVSHOT" "marker: cvtvault"
-          expect_fail cardputer-e2e "no 'vault' partition" "test partition 'cvtvault'" "marker: CVTEST" "marker: unknown command"
+          expect_fail cardputer-debug "no 'vault' partition" "test partition 'cvtvault'" "marker: CVSHOT" "marker: cvtvault" "test update key"
+          expect_fail cardputer-e2e "no 'vault' partition" "test partition 'cvtvault'" "marker: CVTEST" "marker: unknown command" "test update key"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

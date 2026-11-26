@@ -106,7 +106,9 @@ LayoutCheck classify_layout(const std::vector<PartitionInfo>& actual,
 // The partition table this firmware was built with (partitions.csv, or
 // partitions_test.csv in test builds). A host test compares both with the CSVs.
 std::vector<PartitionInfo> release_layout();
-std::vector<PartitionInfo> test_layout();
+#if !defined(ARDUINO) || defined(CV_UPDATE_TEST_KEY)
+std::vector<PartitionInfo> test_layout();  // test builds and host tests only
+#endif
 
 // What the boot after an install found: the slot the update was written to
 // is running (and confirmed) or the bootloader went back to the old one.

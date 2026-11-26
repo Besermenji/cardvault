@@ -4,7 +4,8 @@
   check_update_key.py                  src/platform/update_key.h matches tools/update_key.pub.pem
                                        (release) and tools/e2e/update_test_key.pub.pem (test); the
                                        release key is real (not the zero placeholder, not the test key)
-  check_update_key.py --image app.bin  a release app image holds the release key and not the test key
+  check_update_key.py --image app.bin  an app image holds the release key and not the test key
+                                       (used by tools/check_release_image.sh)
 
 Prints "FAIL: <reason>" lines on stderr and exits 1 on any problem. Standard library only.
 """
@@ -48,8 +49,7 @@ def header_keys():
     return keys[0], keys[1]  # test, release
 
 
-def main():
-    test_h, release_h = header_keys()
+def check_sources(test_h, release_h):
     test_pem, release_pem = pem_key(TEST_PEM), pem_key(RELEASE_PEM)
     if test_h is not None and test_pem is not None and test_h != test_pem:
         problems.append("the test key in update_key.h differs from tools/e2e/update_test_key.pub.pem")
@@ -61,13 +61,23 @@ def main():
         elif release_pem is not None and release_h != release_pem:
             problems.append("the release key in update_key.h differs from tools/update_key.pub.pem")
 
+
+def check_image(path, test_h, release_h):
+    app = open(path, "rb").read()
+    if test_h is not None and test_h in app:
+        problems.append("image holds the test update key (a test build?)")
+    # With the placeholder there is nothing to look for; the source check fails on it.
+    if release_h is not None and release_h != bytes(32) and release_h not in app:
+        problems.append("image does not hold the release update key")
+
+
+def main():
+    test_h, release_h = header_keys()
     if len(sys.argv) == 3 and sys.argv[1] == "--image":
-        app = open(sys.argv[2], "rb").read()
-        if test_h is not None and test_h in app:
-            problems.append("image holds the test update key (a test build?)")
-        if release_h is not None and release_h != bytes(32) and release_h not in app:
-            problems.append("image does not hold the release update key")
-    elif len(sys.argv) != 1:
+        check_image(sys.argv[2], test_h, release_h)
+    elif len(sys.argv) == 1:
+        check_sources(test_h, release_h)
+    else:
         sys.exit(__doc__)
 
     for p in problems:
