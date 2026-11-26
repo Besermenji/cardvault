@@ -56,9 +56,15 @@ Download `cardvault-vX.Y.Z-cardputer-adv.bin` from
 esptool.py --chip esp32s3 write_flash 0x0 cardvault-vX.Y.Z-cardputer-adv.bin
 ```
 
+This single file is for a **first install**. To update a device that already has a vault, don't use it
+(see [Updating](#updating)).
+
 ### M5Burner
 
 Search for *CardVault* in M5Burner's Cardputer section.
+
+M5Burner is fine for a **first install**. Updating a vault with it erases the wrong-passphrase counter
+(see [Updating](#updating)).
 
 ### Next to other firmware (Launcher)
 
@@ -68,7 +74,10 @@ not CardVault's. CardVault is built for Launcher 2.9.1 (it reads the partition t
 and creates a `vault` storage area), but this has **not yet been verified on hardware**
 ([#28](https://github.com/Besermenji/cardvault/issues/28)). CardVault only ever uses its own `vault`
 partition. Press <kbd>Enter</kbd> or <kbd>G0</kbd> while booting to get back to Launcher and switch
-firmware.
+firmware. Update CardVault from Launcher too: *Update firmware* in CardVault's settings is switched
+off under Launcher, because CardVault's second slot would be Launcher's space. **When updating, never
+pick a "Remove ..." option in Launcher:** it can delete CardVault's vault (see
+[docs/UPDATING.md](docs/UPDATING.md#installed-through-launcher)).
 
 On the first start after installing through Launcher, CardVault asks to **set up its storage area**.
 Answer **Y**. It only formats CardVault's own `vault` area and **doesn't touch Launcher or any other
@@ -84,6 +93,19 @@ storage area.
 ```sh
 pio run -e cardputer -t upload
 ```
+
+### Updating
+
+Make an SD backup first. Settings > **Update firmware** installs a newer version from the SD card:
+copy the signed `cardvault-vX.Y.Z-cardputer-adv.cvu` from the release page into `/cardvault` on the
+card. Coming from v0.3.0 or older, update once over USB first, with the web flasher ("Erase device"
+unticked) or esptool and the four part files; your vault is kept.
+
+**Warning: writing the single `cardvault-vX.Y.Z-cardputer-adv.bin` over an existing vault (M5Burner,
+or esptool at 0x0) erases the wrong-passphrase counter. You then get one passphrase attempt, after a
+5-minute wait, and a typo erases the vault.**
+
+Step by step, and what every message means: [docs/UPDATING.md](docs/UPDATING.md).
 
 ## Using it
 

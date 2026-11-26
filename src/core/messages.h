@@ -102,6 +102,55 @@ constexpr const char* kBackupSavedTyped =
 constexpr const char* kBackupSavedEntry =
     "Saved /cardvault/%s (verified). It opens with the password of \"%s\".";
 
+// Update firmware from the SD card (#85). Every message says what to do next;
+// docs/UPDATING.md has a table with the same texts.
+constexpr const char* kUpdateTitle = "Update firmware";
+constexpr const char* kUpdateNoCard = "Insert the microSD card with the update file.";
+constexpr const char* kUpdateNoFileTitle = "No update file";
+constexpr const char* kUpdateNoFile =
+    "Copy cardvault-vX.Y.Z-cardputer-adv.cvu from the GitHub release into /cardvault on the "
+    "SD card.";
+constexpr const char* kUpdateLauncherTitle = "Not available";
+constexpr const char* kUpdateLauncher =
+    "CardVault was installed through Launcher or with another partition table. Update it from "
+    "Launcher.";
+constexpr const char* kUpdateNoSlotTitle = "Full install needed";
+// Not M5Burner: it writes one file over the attempt counter, leaving a single try.
+constexpr const char* kUpdateNoSlot =
+    "Back up to SD first. Then update once with the web flasher, leaving Erase device "
+    "unticked. After that, SD updates work.";
+constexpr const char* kUpdateInMemory =
+    "Your vault is only in memory right now. Fix storage (Compact vault) before updating.";
+constexpr const char* kUpdateFailedTitle = "Update failed";
+constexpr const char* kUpdateBadFile =
+    "This is not a CardVault update file, or it is damaged. Download it again.";
+constexpr const char* kUpdateBadSignature =
+    "Not an official CardVault file. Download it only from the GitHub releases page.";
+constexpr const char* kUpdateWrongDevice = "This update is for another device.";
+constexpr const char* kUpdateTooBig = "This update does not fit this device's firmware slot.";
+constexpr const char* kUpdateOlderTitle = "Older version";
+// %s = file version, %s = running version
+constexpr const char* kUpdateTooOld =
+    "v%s is older than this version (v%s). To go back, use the web flasher.";
+constexpr const char* kUpdateTruncated = "The file is incomplete. Copy it to the card again.";
+constexpr const char* kUpdateDamaged = "The file is damaged. Copy it to the card again.";
+constexpr const char* kUpdateReadFailed =
+    "The card could not be read. Nothing was changed. Check the card and try again.";
+constexpr const char* kUpdateWriteFailed =
+    "Writing the update failed. Nothing was changed: this version stays installed.";
+// %s = file version, %s = running version
+constexpr const char* kUpdateConfirm =
+    "Install v%s? Now v%s. Your vault is not changed. Keep the power on; if it is cut, this "
+    "version still starts. Y to install.";
+constexpr const char* kUpdateInstalling = "Installing...";
+constexpr const char* kUpdateDoneTitle = "Updated";
+// %s = new version
+constexpr const char* kUpdateDone = "CardVault v%s is installed. Unlock as usual.";
+constexpr const char* kUpdateRolledBackTitle = "Update rolled back";
+// %s = version that did not start, %s = running version
+constexpr const char* kUpdateRolledBack =
+    "v%s did not start, so CardVault went back to v%s. Your vault is not changed.";
+
 constexpr int kDialogCols = 33;
 constexpr int kDialogMaxLines = 6;
 

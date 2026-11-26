@@ -391,7 +391,7 @@ def save_entry(d):
 
 
 # Settings rows (0-based)
-ROW_BACKUP, ROW_RESTORE, ROW_COMPACT = 4, 5, 7
+ROW_BACKUP, ROW_RESTORE, ROW_UPDATE, ROW_COMPACT = 4, 5, 6, 8
 
 
 def open_setting(d, row):
@@ -2192,6 +2192,351 @@ def saved_password_steps(d, key, vault):
     d.key("n")
     st = d.screen("home")
     check(d.dump() == before and st["fails"] == 0, f"typed restore of the saved-key backup: {st}")
+
+# -- SD firmware update (#85) --------------------------------------------------------
+#
+# The image is not uploaded: `sdstage` copies the device's RUNNING app image onto the
+# card behind a header signed here (make_update.py, OpenSSL 3, the test key). So the
+# image on the device must be .pio/build/cardputer-e2e/firmware.bin, the build that was
+# flashed; otherwise every install ends in "The file is damaged".
+
+E2E_IMAGE = os.path.join(REPO, ".pio", "build", "cardputer-e2e", "firmware.bin")
+TEST_KEY = os.path.join(REPO, "tools", "e2e", "update_test_key.pem")
+UPDATE_FILE = "cardvault-e2e.cvu"
+
+
+def make_update_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("make_update", os.path.join(REPO, "tools", "make_update.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def update_header(version=None, target=None, key=TEST_KEY):
+    """(header bytes, image length) of a .cvu for the e2e image."""
+    if not os.path.exists(E2E_IMAGE):
+        raise Skip(f"no {E2E_IMAGE}: build env cardputer-e2e first")
+    mu = make_update_module()
+    image = open(E2E_IMAGE, "rb").read()
+    signed = mu.signed_header(version or mu.source_version(), image, target or mu.TARGET)
+    sig = mu.sign(signed, key)
+    return signed + sig, len(image)
+
+
+def throwaway_key(tmp):
+    path = os.path.join(tmp, "other.pem")
+    subprocess.run([make_update_module().openssl(), "genpkey", "-algorithm", "ed25519", "-out", path],
+                   check=True)
+    return path
+
+
+def stage(d, name, header, length, flip=-1):
+    """Write /cardvault/<name>: `header` plus the first `length` bytes of the running image."""
+    d.cmd(f"sdstage {name} {length} {flip} {header.hex()}", timeout=90)
+
+
+def ota(d):
+    return json.loads(d.cmd("ota"))
+
+
+def source_version():
+    return make_update_module().source_version()
+
+
+def open_update_menu(d):
+    open_setting(d, ROW_UPDATE)
+    st = d.screen("menu", "Update firmware", timeout=30)
+    return st, info(st)["items"].split("|"), info(st)["details"].split("|")
+
+
+def wait_install(d, boot_id, timeout=120):
+    """Y was pressed on the install question; `boot_id` is ota()'s from before it.
+    Waits until the device answers again and says whether it restarted (True) or
+    the install ended with a message (False). A software restart keeps the USB
+    link up, so only the boot id tells them apart. The port is not reopened
+    while the install may be running: reopening can reset the chip."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            return json.loads(d.cmd("ota", timeout=2))["boot_id"] != boot_id
+        except Fail:
+            continue  # busy installing, or restarting
+        except (serial.SerialException, OSError):
+            time.sleep(1.5)  # the link did drop: the device restarted
+            d.close(drain=0.5)
+            d.connect(timeout=60)
+    raise Fail("the install neither ended nor restarted the device")
+
+
+def until(d, pred, what, timeout=90):
+    """Like d.wait, but survives restarts on the way (reconnects)."""
+    end = time.time() + timeout
+    last = None
+    while time.time() < end:
+        try:
+            last = d.state()
+            if pred(last):
+                return last
+        except (Fail, serial.SerialException, OSError):
+            d.close(drain=0.2)
+            time.sleep(1)
+            try:
+                d.connect(timeout=10)
+            except Fail:
+                pass
+        time.sleep(0.3)
+    raise Fail(f"timeout waiting for {what}; last state: {last}")
+
+
+def install_from_menu(d, label):
+    """Pick `label` in the update menu and say Y. Returns (state before, restarted)."""
+    _, items, _ = open_update_menu(d)
+    check(label in items, f"update menu has no {label!r}: {items}")
+    d.menu_pick(label)
+    st = d.screen("confirm", "Update firmware", timeout=30)
+    v = source_version()
+    check(f"Install v{v}?" in info(st)["msg"] and f"Now v{v}" in info(st)["msg"],
+          f"install question must name both versions: {st}")
+    before = ota(d)
+    d.cmd("key y")
+    return before, wait_install(d, before["boot_id"])
+
+
+def update_failed(d, text, before):
+    """The install or pick ended in a message containing `text`; nothing switched."""
+    st, _ = wait_message(d, ("Update failed", "Older version", "SD card not readable"))
+    check(text in info(st)["msg"], f"expected {text!r}: {st}")
+    o = ota(d)
+    check(o["running"] == before["running"] and o["boot"] == before["running"],
+          f"a failed update must not switch slots: {before} -> {o}")
+    d.key("enter")
+    return st
+
+
+def t32_sd_update_same_version(d):
+    """#85: install the running version from the card, twice. Each install
+    switches slot, restarts, says "Updated", confirms the new slot and opens
+    the same vault; the second one comes back to the first slot."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    o = ota(d)
+    check(o["layout"] == 0, f"the test table must count as CardVault's own: {o}")
+    # "none": a slot flashed over USB has no OTA state at all.
+    check(o["state"] in ("valid", "undefined", "none"), f"running image not confirmed: {o}")
+    entries = d.dump()
+    header, length = update_header()
+    v = source_version()
+    start = o["running"]
+    try:
+        for round_ in (1, 2):
+            stage(d, UPDATE_FILE, header, length)
+            _, items, details = open_update_menu(d)
+            check(items == [f"v{v}"] and details == ["installed"], f"menu: {items} {details}")
+            d.key("esc")
+            before, restarted = install_from_menu(d, f"v{v}")
+            check(restarted, "a good update must restart the device"
+                  " (a 'damaged' message means the device does not run the cardputer-e2e build in .pio)")
+            st = until(d, lambda s: s["screen"] == "message", "the after-update message")
+            check(st["title"] == "Updated" and f"v{v} is installed" in info(st)["msg"], f"{st}")
+            o = ota(d)
+            check(o["running"] == before["next"] and o["state"] == "valid",
+                  f"round {round_}: new slot must run and be confirmed: {before} -> {o}")
+            d.key("enter")
+            d.unlock(P3)
+            check(d.dump() == entries, "the vault must be unchanged by an update")
+            check(d.state()["fails"] == 0, "an update must not count attempts")
+        check(ota(d)["running"] == start, "two updates must come back to the first slot")
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
+
+def t33_sd_update_refusals(d):
+    """#85: every bad file is refused with its own message and nothing switches:
+    another key, an older version, another device, an unknown file, a short
+    file, and a damaged image (found only after the whole write)."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    before = ota(d)
+    v = source_version()
+    header, length = update_header()
+    with tempfile.TemporaryDirectory() as tmp:
+        other, _ = update_header(key=throwaway_key(tmp))
+    older, _ = update_header(version="0.0.1")
+    device, _ = update_header(target="cardputer")
+    files = {  # name: (header, staged length, flip offset, menu label, menu detail)
+        "a-other-key.cvu": (other, 0, -1, "a-other-key.cvu", "not valid"),
+        "b-older.cvu": (older, 0, -1, "v0.0.1", "older"),
+        "c-device.cvu": (device, 0, -1, "c-device.cvu", "not valid"),
+        "d-junk.cvu": (bytes(176), 0, -1, "d-junk.cvu", "not valid"),
+        "e-short.cvu": (header, length - 1000, -1, "e-short.cvu", "not valid"),
+        "f-damaged.cvu": (header, length, 176 + 5000, f"v{v}", "installed"),
+    }
+    try:
+        for name, (h, n, flip, _, _) in files.items():
+            stage(d, name, h, n, flip)
+        _, items, details = open_update_menu(d)
+        check(items == [f[3] for f in files.values()] and details == [f[4] for f in files.values()],
+              f"menu: {items} {details}")
+        expect = [
+            ("a-other-key.cvu", "Not an official CardVault file"),
+            ("v0.0.1", f"v0.0.1 is older than this version (v{v})"),
+            ("c-device.cvu", "for another device"),
+            ("d-junk.cvu", "not a CardVault update file"),
+        ]
+        # A short file is not valid in the list either; picking it says why.
+        expect.append(("e-short.cvu", "incomplete"))
+        for i, (label, text) in enumerate(expect):
+            if i:  # picking a file closed the list
+                open_update_menu(d)
+            d.menu_pick(label)
+            update_failed(d, text, before)
+        # A damaged image passes the header and is caught after the whole write.
+        _, restarted = install_from_menu(d, f"v{v}")
+        check(not restarted, "a damaged image must not restart the device")
+        update_failed(d, "The file is damaged", before)
+        check(d.state()["fails"] == 0, "refused updates must not count attempts")
+    finally:
+        for name in files:
+            d.cmd(f"sdrm {name}")
+
+
+def t34_sd_update_card_pulled(d):
+    """#85: pulling the card during the install ends in a message, the old
+    version stays the boot slot and the vault still opens."""
+    need_card()
+    d.cmd("sdcut off")
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    header, length = update_header()
+    stage(d, UPDATE_FILE, header, length)
+    try:
+        before = ota(d)
+        _, items, _ = open_update_menu(d)
+        d.menu_pick(items[0])
+        d.screen("confirm", "Update firmware", timeout=30)
+        d.cmd("sdcut 1500")  # taken by the install's read, 1.5 s in
+        d.cmd("key y")
+        check(not wait_install(d, before["boot_id"]), "a pulled card must not restart the device")
+        d.cmd("sdcut off")
+        st = d.state()
+        # It must be the card that is blamed, not the file or the flash.
+        check(st["title"] == "SD card not readable" or "The card could not be read" in info(st)["msg"],
+              f"expected the card-read error: {st}")
+        update_failed(d, "", before)
+        d.cmd("g0")
+        d.unlock(P3)
+    finally:
+        d.cmd("sdcut off")
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
+
+def t35_sd_update_power_cut(d):
+    """#85: power cut while the new image is written: the old version starts,
+    with no update message, and opens the vault."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    header, length = update_header()
+    stage(d, UPDATE_FILE, header, length)
+    try:
+        before = ota(d)
+        _, items, _ = open_update_menu(d)
+        d.menu_pick(items[0])
+        d.screen("confirm", "Update firmware", timeout=30)
+        d.cmd("key y")
+        time.sleep(1.5)  # writing (the whole install takes several seconds)
+        d.hard_reset()
+        st = d.screen("unlock", timeout=30)
+        o = ota(d)
+        check(o["running"] == before["running"],
+              f"install finished before the power cut, or the slot switched: {before} -> {o}")
+        check(o["state"] in ("valid", "undefined", "none"), f"old slot must stay confirmed: {o}")
+        d.unlock(P3)
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
+
+def t36_sd_update_rolls_back(d):
+    """#85: a new image that never confirms itself (simulated with `otaflag
+    noconfirm`) restarts, and the bootloader starts the old version again,
+    which says so once and opens the vault."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    header, length = update_header()
+    stage(d, UPDATE_FILE, header, length)
+    try:
+        d.cmd("otaflag noconfirm")
+        before, restarted = install_from_menu(d, f"v{source_version()}")
+        check(restarted, "the install must restart the device")
+        st = until(d, lambda s: s["screen"] == "message", "the rollback message", timeout=120)
+        v = source_version()
+        check(st["title"] == "Update rolled back" and f"v{v} did not start" in info(st)["msg"],
+              f"{st}")
+        o = ota(d)
+        check(o["running"] == before["running"] and o["boot"] == before["running"],
+              f"the bootloader must have gone back to the old slot: {before} -> {o}")
+        d.key("enter")
+        d.unlock(P3)
+        # The rolled-back slot is not offered as running; a new install works again.
+        check(ota(d)["next"] == before["next"], "the other slot must still be free for updates")
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
+
+def t37_sd_update_then_usb_install(d):
+    """#85: an update is installed, then the boot slot is reset over USB (as a web
+    flasher or esptool update does) before the "Updated" message was shown. The
+    next boot must not claim the update "did not start": it says nothing."""
+    need_card()
+    if d.state()["screen"] == "unlock":
+        d.unlock(P3)
+    esptool = find_esptool()
+    core = os.environ.get("PLATFORMIO_CORE_DIR", os.path.expanduser("~/.platformio"))
+    boot_app0 = os.path.join(core, "packages", "framework-arduinoespressif32", "tools", "partitions",
+                             "boot_app0.bin")
+    if not os.path.exists(boot_app0):
+        raise Skip(f"no {boot_app0}")
+
+    def reset_ota_data():
+        d.close(drain=0)
+        r = subprocess.run(esptool + ["--chip", "esp32s3", "--port", d.port, "write_flash",
+                                      "0xe000", boot_app0], capture_output=True, text=True, timeout=120)
+        check(r.returncode == 0, f"esptool write_flash failed: {r.stdout[-300:]}")
+        time.sleep(3)
+        d.connect()
+
+    # Start on app0, so the update goes to app1 and the reset really goes back.
+    if ota(d)["running"] != "app0":
+        reset_ota_data()
+        d.unlock(P3)
+    header, length = update_header()
+    stage(d, UPDATE_FILE, header, length)
+    try:
+        _, items, _ = open_update_menu(d)
+        d.menu_pick(items[0])
+        d.screen("confirm", "Update firmware", timeout=30)
+        before = ota(d)
+        d.skip_splash = False  # the message must not be consumed before the USB reset
+        try:
+            d.cmd("key y")
+            check(wait_install(d, before["boot_id"]), "the install must restart the device")
+            st = json.loads(d.cmd("state"))
+            check(st["screen"] == "splash" and ota(d)["running"] == "app1",
+                  f"expected the new slot, still on the splash: {st}")
+            reset_ota_data()
+        finally:
+            d.skip_splash = True
+        st = d.screen("unlock", timeout=30)
+        o = ota(d)
+        check(o["running"] == "app0", f"blank OTA data must boot app0: {o}")
+        d.unlock(P3)
+    finally:
+        d.cmd(f"sdrm {UPDATE_FILE}")
+
 
 SCENARIOS = [v for k, v in sorted(globals().items()) if re.match(r"t\d\d_", k)]
 

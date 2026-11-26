@@ -26,14 +26,24 @@ pio test -e native              # run host unit tests
   table, whose vault partition is labelled `cvtvault` instead of `vault`, and their own NVS namespaces.
   They cannot open a real vault. Flash them with `pio run -e <env> -t upload`, which writes the partition
   table too. `CV_TEST_DELAY_DIV` and `CV_REVEAL_MS` are only accepted together with `CV_TEST_HOOKS`.
-- When `partitions.csv` changes, `tools/check_release_image.sh` follows it (it reads the vault row from there).
+- When `partitions.csv` changes, `tools/check_release_image.sh` follows it (it reads the vault, app0 and
+  app1 rows from there). The vault row itself must never move: released devices keep their vault across a
+  full install only because it stays at 0x310000 (`tools/check_image_partitions.py` pins it). Keep
+  `release_layout()` / `test_layout()` in `src/core/update.cpp` in step; a host test compares them with the
+  CSV files.
+- Anything that installs over an existing vault must not write NVS (0x9000-0xDFFF): the attempt counter
+  lives there and a missing one allows a single try. `tools/check_flash_parts.py` checks the web flasher's
+  parts; keep its NVS range in step with `partitions.csv`.
+- Test, debug and e2e builds verify SD updates with the test key (`-DCV_UPDATE_TEST_KEY=1`,
+  `tools/e2e/update_test_key.pem`); its private key is public, so a release image holding it is refused.
 - `tools/merge_bin.sh <version> <out_dir> <env>` can merge other environments for flashing, but names the
   result `...-NOT-FOR-RELEASE.bin`.
 
 ## Screenshots
 
 `docs/screenshots/` is generated, not drawn: when a screen's look changes, flash `cardputer-e2e` and run
-`python3 tools/screenshots.py <port> --yes` (see the README), then commit the changed PNGs. The `shot` command
+`python3 tools/screenshots.py <port> --yes` (add `--sd` with a card in to retake the SD update screens)
+(see the README), then commit the changed PNGs. The `shot` command
 it uses lives in `src/test_hooks.cpp`, so it only exists in the e2e build.
 
 ## UI changes

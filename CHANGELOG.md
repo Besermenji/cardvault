@@ -6,6 +6,38 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+**Breaking: coming from v0.3.0 or older, update once over USB with the web flasher ("Erase device"
+unticked) or esptool and the four part files.** Make an SD backup first. Don't use M5Burner or the
+single `.bin` over an existing vault: you would get one passphrase attempt, after 5 minutes, and a typo
+erases the vault. Installed through Launcher: update from Launcher, and never pick a "Remove ..."
+option there. See [docs/UPDATING.md](https://github.com/Besermenji/cardvault/blob/main/docs/UPDATING.md).
+
+### Added
+- Update firmware from the SD card (#85). Settings > *Update firmware* lists the `.cvu` files in
+  `/cardvault`, installs the chosen one into a second firmware slot and restarts. Only files signed with
+  the CardVault release key (Ed25519) and the same or a newer version are accepted, and only while the
+  vault is unlocked. A power cut during the install leaves the old version in place; a new version that
+  doesn't start rolls back to the old one, and the device says so once. Not offered under Launcher.
+  Step by step: [docs/UPDATING.md](docs/UPDATING.md). Releases now include
+  `cardvault-vX.Y.Z-cardputer-adv.cvu`, signed by a separate release job, and the release notes say how
+  to update.
+  e2e t32-t36 cover a same-version install (twice, back and forth), every refusal, a pulled card, a
+  power cut and a rollback.
+
+### Changed
+- The partition table has a second app slot (`app1` at 0x410000). Coming from v0.3.0 or older, update
+  once over USB with the web flasher (leave *Erase device* unticked) or esptool and the four part files;
+  the vault stays where it was and is kept. The release check now pins the vault's position.
+- Settings > *About* shows the firmware slot (`app0` or `app1`).
+
+### Fixed
+- Updating over USB no longer costs the attempt counter. The single merged `.bin` overwrites the area
+  that holds it, after which CardVault allows one passphrase attempt (after 5 minutes) and a wrong one
+  erases the vault; this was true of every earlier update with that file. The web flasher now installs
+  the firmware as four parts that skip the area, releases include those parts for esptool, and a build
+  check keeps them that way. **M5Burner and flashing the single file at 0x0 still erase the counter**:
+  use them for first installs only.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added

@@ -11,6 +11,7 @@
 #include <Preferences.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
+#include <esp_ota_ops.h>
 #include <esp_partition.h>
 #include <unity.h>
 
@@ -54,6 +55,27 @@ void test_runs_on_test_partition_layout() {
     // The production partition must not exist on a test layout.
     TEST_ASSERT_FALSE_MESSAGE(production_vault_exists(),
                               "refusing to run: a production 'vault' partition exists");
+}
+
+// Both firmware slots exist where partitions.csv has them (#85), and an update
+// always goes to the slot that is not running.
+void test_two_app_slots_for_updates() {
+    const esp_partition_t* a0 =
+        esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, "app0");
+    const esp_partition_t* a1 =
+        esp_partition_find_first(ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_1, "app1");
+    TEST_ASSERT_NOT_NULL(a0);
+    TEST_ASSERT_NOT_NULL(a1);
+    TEST_ASSERT_EQUAL_HEX32(0x10000, a0->address);
+    TEST_ASSERT_EQUAL_HEX32(0x410000, a1->address);
+    TEST_ASSERT_EQUAL_HEX32(0x300000, a0->size);
+    TEST_ASSERT_EQUAL_HEX32(0x300000, a1->size);
+    TEST_ASSERT_EQUAL_HEX32(0x710000, vault_part()->address);
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+    TEST_ASSERT_NOT_NULL(next);
+    TEST_ASSERT_TRUE(running == a0 || running == a1);
+    TEST_ASSERT_TRUE(next == (running == a0 ? a1 : a0));
 }
 
 // ---- FlashStore -------------------------------------------------------------
@@ -577,6 +599,7 @@ void setup() {
     M5Cardputer.begin(cfg, false);
     UNITY_BEGIN();
     RUN_TEST(test_runs_on_test_partition_layout);
+    RUN_TEST(test_two_app_slots_for_updates);
     if (vault_part() && !production_vault_exists()) {
         RUN_TEST(test_blank_partition_is_formatted_and_mounted);
         RUN_TEST(test_unreadable_partition_is_never_formatted);

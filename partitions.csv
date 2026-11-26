@@ -1,5 +1,10 @@
+# Release table. The vault row must never move: devices keep their vault
+# across a full-image install only because offset, size and label stay the
+# same (CI compares it with v0.3.0). app1 is the second slot for updates
+# from the SD card (#85).
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  ota_0,   0x10000,  0x300000,
 vault,    data, spiffs,  0x310000, 0x100000,
+app1,     app,  ota_1,   0x410000, 0x300000,

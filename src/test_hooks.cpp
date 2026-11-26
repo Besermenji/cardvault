@@ -3,11 +3,14 @@
 #include "test_hooks.h"
 
 #include <M5Cardputer.h>
+#include <SD.h>
+#include <esp_ota_ops.h>
 
 #include <string>
 #include <vector>
 
 #include "core/flows.h"
+#include "platform/ota.h"
 #include "platform/sd_backup.h"
 #include "ui/gfx.h"
 #include "ui/sim_keyboard.h"
@@ -19,6 +22,9 @@ namespace {
 
 std::string g_line;
 bool g_g0 = false;
+// New on every boot (`ota` reports it). A software restart keeps the USB link
+// up, so this is how the host sees that one happened.
+uint32_t g_boot_id = 0;
 // Id of the request being answered ("-" when the line had none). Every reply
 // carries it, so the host can tell a late reply from the one it waits for.
 std::string g_id = "-";
@@ -196,6 +202,88 @@ void shot(ui::App& a) {
     Serial.println();
 }
 
+// Firmware slots for the update tests (#85).
+void ota_state() {
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    const esp_partition_t* boot = esp_ota_get_boot_partition();
+    const esp_partition_t* next = esp_ota_get_next_update_partition(nullptr);
+    esp_ota_img_states_t st;
+    const char* state = "none";
+    if (running && esp_ota_get_state_partition(running, &st) == ESP_OK) {
+        switch (st) {
+            case ESP_OTA_IMG_NEW: state = "new"; break;
+            case ESP_OTA_IMG_PENDING_VERIFY: state = "pending"; break;
+            case ESP_OTA_IMG_VALID: state = "valid"; break;
+            case ESP_OTA_IMG_INVALID: state = "invalid"; break;
+            case ESP_OTA_IMG_ABORTED: state = "aborted"; break;
+            default: state = "undefined"; break;
+        }
+    }
+    auto label = [](const esp_partition_t* p) { return std::string(p ? p->label : ""); };
+    reply("{\"running\":\"" + label(running) + "\",\"state\":\"" + state + "\",\"boot\":\"" +
+          label(boot) + "\",\"next\":\"" + label(next) + "\",\"layout\":" +
+          std::to_string(int(ota::layout())) + ",\"boot_id\":" + std::to_string(g_boot_id) + "}");
+}
+
+bool hex_bytes(const std::string& h, std::vector<uint8_t>& out) {
+    if (h.size() % 2) return false;
+    out.clear();
+    for (size_t i = 0; i < h.size(); i += 2) {
+        char* end = nullptr;
+        std::string b = h.substr(i, 2);
+        long v = strtol(b.c_str(), &end, 16);
+        if (*end || b.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return false;
+        out.push_back(uint8_t(v));
+    }
+    return true;
+}
+
+bool plain_name(const std::string& n) {
+    return !n.empty() && n.size() <= 64 &&
+           n.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-") ==
+               std::string::npos &&
+           n[0] != '.';
+}
+
+// sdstage <name> <len> <flip> <header hex>: writes /cardvault/<name> as the
+// header (signed by the host) plus the first <len> bytes of the RUNNING app
+// image, so the image needs no slow upload. <flip> >= 0 flips one bit of the
+// file at that offset (a damaged file); -1 leaves it alone.
+void sd_stage(const std::string& arg) {
+    char name[80] = "";
+    unsigned long len = 0;
+    long flip = -1;
+    int used = 0;
+    if (sscanf(arg.c_str(), "%79s %lu %ld %n", name, &len, &flip, &used) != 3 || !plain_name(name))
+        return error("sdstage <name> <len> <flip|-1> <header hex>");
+    std::vector<uint8_t> head;
+    if (!hex_bytes(arg.substr(size_t(used)), head)) return error("bad header hex");
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (!running || len > running->size) return error("bad length");
+    if (!sd::mount()) return error("no card");
+    std::string path = std::string("/cardvault/") + name;
+    File f = SD.open(path.c_str(), FILE_WRITE);
+    if (!f) return error("open failed");
+    bool ok = f.write(head.data(), head.size()) == head.size();
+    std::vector<uint8_t> buf(4096);
+    for (size_t off = 0; ok && off < len; off += buf.size()) {
+        size_t n = std::min(buf.size(), size_t(len - off));
+        ok = esp_partition_read(running, off, buf.data(), n) == ESP_OK && f.write(buf.data(), n) == n;
+    }
+    f.close();
+    if (ok && flip >= 0) {
+        File g = SD.open(path.c_str(), "r+");
+        uint8_t b = 0;
+        ok = g && g.seek(size_t(flip)) && g.read(&b, 1) == 1 && g.seek(size_t(flip));
+        b ^= 0x01;
+        ok = ok && g.write(&b, 1) == 1;
+        if (g) g.close();
+    }
+    sd::unmount();
+    if (!ok) return error("write failed");
+    reply("");
+}
+
 // "<id> <command> [argument]"; the id is a decimal number chosen by the host.
 void handle(ui::App& a, const std::string& request) {
     std::string line;
@@ -305,6 +393,24 @@ void handle(ui::App& a, const std::string& request) {
             return;
         }
         reply("");
+    } else if (cmd == "ota") {
+        ota_state();
+    } else if (cmd == "otaflag") {
+        // otaflag noconfirm: the next freshly installed image restarts
+        // without confirming itself, like a broken one (rollback test).
+        if (arg != "noconfirm") return error("otaflag noconfirm");
+        ota::test_skip_confirm_once();
+        reply("");
+    } else if (cmd == "sdstage") {
+        sd_stage(arg);
+    } else if (cmd == "sdrm") {
+        // sdrm <name>: removes /cardvault/<name> (no error if it is not there).
+        if (!plain_name(arg)) return error("sdrm <name>");
+        if (!sd::mount()) return error("no card");
+        std::string path = "/cardvault/" + arg;
+        if (SD.exists(path.c_str())) SD.remove(path.c_str());
+        sd::unmount();
+        reply("");
     } else if (cmd == "g0") {
         g_g0 = true;
         reply("");
@@ -340,7 +446,11 @@ void handle(ui::App& a, const std::string& request) {
 }  // namespace
 
 void begin() {
+    // The USB serial driver drops bytes beyond its receive queue (256 by
+    // default), and an `sdstage` line is about 400.
+    Serial.setRxBufferSize(1024);
     Serial.begin(115200);
+    g_boot_id = esp_random();
     Serial.println("CVTEST READY");
 }
 

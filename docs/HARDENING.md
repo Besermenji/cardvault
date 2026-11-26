@@ -45,9 +45,12 @@ to verify.
 3. **NVS.** The attempt counter lives in NVS. NVS encryption (or keeping the counter in an encrypted
    data partition) stops it being reset by rewriting flash. With release-mode encryption, plaintext
    writes are blocked anyway, but this needs confirming.
-4. **Updates.** After release mode, USB flashing of plaintext images stops working. CardVault would
-   need a signed update path (for example from the SD card) or users accept "no updates without
-   re-provisioning".
+4. **Updates.** After release mode, USB flashing of plaintext images stops working. Since #85,
+   CardVault can update itself from the SD card (Settings > Update firmware, Ed25519-signed `.cvu`
+   files, see [UPDATING.md](UPDATING.md)); OTA writes go through the flash encryption layer, so the
+   path itself works on an encrypted device. Still open: with secure boot, every app image must also
+   carry a signature from the device owner's secure-boot key, so the official `.cvu` would need
+   re-signing (the format leaves room for that, but nothing does it yet).
 5. **Launcher / M5Burner compatibility.** Hardened devices can't run other firmware. This should be
    an explicit, separate "hardened edition" install, never the default.
 

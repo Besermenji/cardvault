@@ -6,6 +6,7 @@
 #include "crypto/rng.h"
 #include "platform/device.h"
 #include "platform/nvs_kv.h"
+#include "platform/ota.h"
 #include "test_hooks.h"
 #include "ui/app.h"
 #include "ui/gfx.h"
@@ -128,6 +129,9 @@ void setup() {
             a.router.reset(make_splash(boot_ms, "confirm", [] {
                 return make_confirm(msg::kStorageSetupTitle, msg::kStorageSetup,
                                     [] {
+                                        // Restarts next: an unconfirmed image (a first
+                                        // start under Launcher) would roll back.
+                                        ota::confirm_boot();
                                         app().busy("Setting up...");
                                         app().store.format();
                                         ESP.restart();
@@ -141,12 +145,19 @@ void setup() {
             // did not finish. This runs even when the partition does not mount:
             // it is our own "vault" partition, and an exhausted counter means
             // its contents must go, so no confirmation is asked.
+            ota::confirm_boot();  // the wipe restarts; the image itself is fine
             a.wipe_and_reboot(msg::kWipeResume);
         case BootRoute::Unlock:
-            a.router.reset(make_splash(boot_ms, "unlock", [] { return make_unlock(); }));
+            ota::confirm_boot();  // storage opened: an update stays installed
+            a.router.reset(make_splash(boot_ms, "unlock", [] {
+                return with_update_outcome([] { return make_unlock(); });
+            }));
             break;
         case BootRoute::Setup:
-            a.router.reset(make_splash(boot_ms, "setup", [] { return make_setup(); }));
+            ota::confirm_boot();
+            a.router.reset(make_splash(boot_ms, "setup", [] {
+                return with_update_outcome([] { return make_setup(); });
+            }));
             break;
     }
     a.router.apply();
