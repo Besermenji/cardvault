@@ -75,12 +75,12 @@ void draw_progress(float frac) {
 
 void install(const std::string& name, UpdateHeader h) {
     App& a = app();
+    draw_progress(0);  // before begin(): erasing the slot takes a few seconds
     ota::Installer inst;
     if (!inst.begin(h.image_len)) return show(msg::kUpdateFailedTitle, msg::kUpdateWriteFailed);
     UpdateImageCheck check(h);
     bool write_failed = false, overflow = false;
     size_t done = 0, drawn = 0;
-    draw_progress(0);
     bool read_ok = sd::stream_update(name, kUpdateHeaderSize, kChunk,
                                      [&](const uint8_t* p, size_t n) {
                                          if (!check.add(p, n)) {
